@@ -60,6 +60,7 @@ INTENT_SOURCE_EXCLUSIONS: dict[str, set[str]] = {
 SOURCE_CAPABILITIES = {
     "reddit": {"discussion", "social"},
     "x": {"discussion", "social"},
+    "xquik": {"discussion", "social"},
     "youtube": {"video", "video_longform", "discussion"},
     "tiktok": {"video", "video_shortform", "social"},
     "instagram": {"video", "video_shortform", "social"},
