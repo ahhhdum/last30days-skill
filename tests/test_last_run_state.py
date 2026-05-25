@@ -49,6 +49,31 @@ class LastRunStateTests(unittest.TestCase):
             self.assertEqual(payload["topic"], "custom config query")
             self.assertGreaterEqual(payload["total"], 0)
 
+    def test_hook_exits_zero_when_configured_without_last_run(self):
+        # Regression: prior to fix, the trailing `[[ -n "$LAST_RUN_LINE" ]] && echo`
+        # in the HAS_SCRAPECREATORS branch was the last command before EOF. When
+        # last-run.json did not exist, the test returned 1, the && short-circuited,
+        # and the script exited 1 (set -e does not trip on the left of &&). Claude
+        # Code reported "SessionStart:startup hook error / No stderr output".
+        with tempfile.TemporaryDirectory() as tmp:
+            env = os.environ.copy()
+            env["HOME"] = str(Path(tmp) / "home")
+            env["LAST30DAYS_CONFIG_DIR"] = str(Path(tmp) / "empty-config")
+            env["SCRAPECREATORS_API_KEY"] = "dummy"
+
+            result = subprocess.run(
+                ["bash", "hooks/scripts/check-config.sh"],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Ready", result.stdout)
+            self.assertNotIn("Last run", result.stdout)
+
     def test_hook_reads_last_run_from_custom_config_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
             config_dir = Path(tmp) / "custom-config"
