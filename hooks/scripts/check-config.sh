@@ -11,6 +11,13 @@ GLOBAL_ENV="$HOME/.config/last30days/.env"
 check_perms() {
   local file="$1"
   if [[ ! -f "$file" ]]; then return; fi
+  # Windows (Git Bash/MSYS/Cygwin): drives mount `noacl`, so `stat` derives the
+  # POSIX mode from the DOS read-only bit — a writable file always reads 644 and
+  # `chmod 600` is a no-op. NTFS ACLs already protect the file, so skip the
+  # POSIX-perms warning here (it can never be satisfied — a false positive).
+  case "${OSTYPE:-}" in
+    msys*|cygwin*|win*) return ;;
+  esac
   local perms
   # Try GNU stat first (Linux), fall back to BSD stat (macOS).
   # On Linux, `stat -f` prints filesystem info (not permissions) and exits 0,
