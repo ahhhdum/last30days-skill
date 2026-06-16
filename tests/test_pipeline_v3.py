@@ -122,6 +122,26 @@ class PipelineV3Tests(unittest.TestCase):
         self.assertNotIn("jobs", report.items_by_source)
         self.assertNotIn("hiring_signals", report.artifacts)
 
+    def test_single_word_generic_topic_does_not_add_jobs(self):
+        report = pipeline.run(
+            topic="bitcoin",
+            config={"LAST30DAYS_REASONING_PROVIDER": "gemini"},
+            depth="quick",
+            mock=True,
+        )
+        self.assertNotIn("jobs", report.items_by_source)
+        self.assertNotIn("hiring_signals", report.artifacts)
+
+    def test_question_comparison_topic_does_not_add_jobs(self):
+        report = pipeline.run(
+            topic="Python vs Ruby benchmark?",
+            config={"LAST30DAYS_REASONING_PROVIDER": "gemini"},
+            depth="quick",
+            mock=True,
+        )
+        self.assertNotIn("jobs", report.items_by_source)
+        self.assertNotIn("hiring_signals", report.artifacts)
+
     def test_standard_mode_omits_weak_large_company_jobs_signal(self):
         with patch("lib.pipeline._retrieve_stream") as mock_retrieve:
             def fake_retrieve(**kwargs):

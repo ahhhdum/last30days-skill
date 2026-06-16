@@ -633,8 +633,6 @@ def _company_topic_likely(topic: str) -> bool:
     if not text:
         return False
     lower = text.lower()
-    if " vs " in lower or " versus " in lower:
-        return True
     if "?" in text or len(text.split()) > 4:
         return False
     generic = {
@@ -643,7 +641,13 @@ def _company_topic_likely(topic: str) -> bool:
     }
     if any(word in generic for word in lower.split()):
         return False
-    return bool(text[:1].isupper() or len(text.split()) == 1)
+    if " vs " in lower or " versus " in lower:
+        return True
+    known_single_word_companies = {
+        "apple", "uber", "google", "microsoft", "amazon", "meta", "netflix",
+        "openai", "anthropic", "qualtrics",
+    }
+    return bool(text[:1].isupper() or lower in known_single_word_companies)
 
 
 def _warnings(

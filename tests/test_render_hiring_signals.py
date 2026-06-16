@@ -54,6 +54,16 @@ class RenderHiringSignalsTests(unittest.TestCase):
         html_md = render.render_for_html(report)
         self.assertIn("Hiring Signals", html_md)
         self.assertIn("[Enterprise Security Engineer](https://example.com/jobs/1)", html_md)
+        synthesized_html_md = render.render_for_html(
+            report,
+            synthesis_md="What I learned:\n\nHiring points toward enterprise readiness.",
+        )
+        self.assertIn("What I learned", synthesized_html_md)
+        self.assertIn("Hiring Signals", synthesized_html_md)
+        self.assertIn("[Enterprise Security Engineer](https://example.com/jobs/1)", synthesized_html_md)
+        context = render.render_context(report)
+        self.assertIn("Hiring Signals", context)
+        self.assertIn("[Enterprise Security Engineer](https://example.com/jobs/1)", context)
 
     def test_standard_mode_omits_weak_signal(self):
         report = schema.Report(

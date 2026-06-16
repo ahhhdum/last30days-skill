@@ -213,12 +213,13 @@ def render_for_html(
         *_render_badge(),
         *_render_html_metadata(report),
     ]
+    hiring_block = _render_hiring_signals(report)
     if synthesis_md:
         lines.extend(["", synthesis_md.strip()])
-    else:
-        hiring_block = _render_hiring_signals(report)
-        if hiring_block:
+        if hiring_block and "## Hiring Signals" not in synthesis_md:
             lines.extend(["", *hiring_block])
+    elif hiring_block:
+        lines.extend(["", *hiring_block])
     # Data quality warnings are NOT rendered into the HTML artifact. The HTML
     # is meant to be shared (Slack, email, Notion); recipients haven't asked
     # for technical commentary about how the run was produced. Generators see
@@ -952,6 +953,9 @@ def render_context(report: schema.Report, cluster_limit: int = 6) -> str:
     freshness_warning = _assess_data_freshness(report)
     if freshness_warning:
         lines.append(f"Freshness warning: {freshness_warning}")
+    hiring_block = _render_hiring_signals(report)
+    if hiring_block:
+        lines.extend(["", *hiring_block, ""])
     lines.append("Top clusters:")
     for cluster in report.clusters[:cluster_limit]:
         lines.append(f"- {cluster.title} [{', '.join(_source_label(source) for source in cluster.sources)}]")
