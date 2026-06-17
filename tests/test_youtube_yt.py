@@ -774,5 +774,60 @@ class TestYtdlpSSHRouting(unittest.TestCase):
         self.assertIn("--ignore-config", cmd[5])
         self.assertIn("--no-cookies-from-browser", cmd[5])
 
+    def test_search_surfaces_ssh_failure_as_error(self):
+        """SSH connection failures surface as an error, not silent '0 results'."""
+        os.environ["LAST30DAYS_YOUTUBE_SSH_HOST"] = "macmini"
+        from lib.subproc import SubprocResult
+        fake_result = SubprocResult(
+            returncode=255,
+            stdout="",
+            stderr="ssh: connect to host macmini port 22: Connection refused\n",
+        )
+        with mock.patch.object(youtube_yt.subproc, "run_with_timeout",
+                               return_value=fake_result):
+            out = youtube_yt.search_youtube("test", "2026-02-01", "2026-03-01")
+        self.assertIn("error", out)
+        self.assertIn("Connection refused", out["error"])
+
+
+class TestTranscriptSSHRouting(unittest.TestCase):
+    """LAST30DAYS_YOUTUBE_SSH_HOST routes yt-dlp transcript fetches through SSH."""
+
+    def setUp(self):
+        self._saved_env = os.environ.pop("LAST30DAYS_YOUTUBE_SSH_HOST", None)
+
+    def tearDown(self):
+        os.environ.pop("LAST30DAYS_YOUTUBE_SSH_HOST", None)
+        if self._saved_env is not None:
+            os.environ["LAST30DAYS_YOUTUBE_SSH_HOST"] = self._saved_env
+
+    def test_ssh_helper_invokes_remote_mktemp_pipeline(self):
+        os.environ["LAST30DAYS_YOUTUBE_SSH_HOST"] = "macmini"
+        from lib.subproc import SubprocResult
+        fake_vtt = "WEBVTT\nKind: captions\nLanguage: en\n\n00:00:00.000 --> 00:00:02.000\nhi\n"
+        fake_result = SubprocResult(returncode=0, stdout=fake_vtt, stderr="")
+        with mock.patch.object(youtube_yt.subproc, "run_with_timeout",
+                               return_value=fake_result) as run_mock:
+            out = youtube_yt._fetch_transcript_ytdlp_via_ssh("vid1", "macmini")
+        self.assertEqual(out, fake_vtt)
+        remote_script = run_mock.call_args.args[0][5]
+        self.assertIn("mktemp -d", remote_script)
+        self.assertIn("find ", remote_script)
+
+    def test_fetch_transcript_uses_ssh_helper_when_routing_on(self):
+        os.environ["LAST30DAYS_YOUTUBE_SSH_HOST"] = "macmini"
+        fake_vtt = "WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nhello there friends\n"
+        with mock.patch.object(youtube_yt, "is_ytdlp_installed", return_value=True), \
+             mock.patch.object(youtube_yt, "_fetch_transcript_ytdlp_via_ssh",
+                               return_value=fake_vtt) as ssh_mock, \
+             mock.patch.object(youtube_yt, "_fetch_transcript_ytdlp") as local_mock, \
+             mock.patch.object(youtube_yt, "_fetch_transcript_direct") as direct_mock:
+            result = youtube_yt.fetch_transcript("vidX", "/tmp/test")
+        ssh_mock.assert_called_once_with("vidX", "macmini")
+        local_mock.assert_not_called()
+        direct_mock.assert_not_called()
+        self.assertIn("hello there friends", result)
+
+
 if __name__ == "__main__":
     unittest.main()

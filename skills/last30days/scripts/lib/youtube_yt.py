@@ -313,6 +313,7 @@ def search_youtube(
         "--no-download",
     ]
     cmd = _wrap_ytdlp_cmd(cmd)
+    ssh_host = _ytdlp_ssh_host()
 
     try:
         result = subproc.run_with_timeout(cmd, timeout=120)
@@ -323,6 +324,17 @@ def search_youtube(
         return {"items": [], "error": "yt-dlp not found"}
 
     stdout = result.stdout
+    if ssh_host and result.returncode != 0 and not stdout.strip():
+        stderr_first = (result.stderr or "").strip().splitlines()
+        first_line = stderr_first[0] if stderr_first else "(no stderr)"
+        _log(
+            f"YouTube search via SSH host {ssh_host!r} failed "
+            f"(rc={result.returncode}): {first_line}"
+        )
+        return {
+            "items": [],
+            "error": f"SSH routing to {ssh_host!r} failed: {first_line}",
+        }
     if not stdout.strip():
         _log("YouTube search returned 0 results")
         return {"items": []}
@@ -511,6 +523,45 @@ def _fetch_transcript_direct(
     return vtt_text
 
 
+def _fetch_transcript_ytdlp_via_ssh(video_id: str, ssh_host: str) -> Optional[str]:
+    """Fetch transcript via yt-dlp on a remote SSH host (mktemp + cat pipeline)."""
+    if not _SSH_HOST_ALIAS_RE.match(ssh_host):
+        return None
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    quoted_url = shlex.quote(url)
+    sub_langs = shlex.quote(_ytdlp_sub_langs())
+    remote_script = (
+        "set -e; "
+        "TMPD=$(mktemp -d); "
+        "yt-dlp --ignore-config --no-cookies-from-browser "
+        f"--write-auto-subs --sub-lang {sub_langs} --sub-format vtt "
+        "--skip-download --no-warnings "
+        f'-o "$TMPD/%(id)s" {quoted_url} >/dev/null 2>&1 || true; '
+        'VTT=$(find "$TMPD" -maxdepth 1 -name "*.vtt" 2>/dev/null | head -1); '
+        '[ -n "$VTT" ] && cat "$VTT"; '
+        'rm -rf "$TMPD"'
+    )
+    cmd = ["ssh", "-o", "BatchMode=yes", "--", ssh_host, remote_script]
+    try:
+        result = subproc.run_with_timeout(cmd, timeout=45)
+    except subproc.SubprocTimeout:
+        _log(f"SSH yt-dlp transcript timed out for {video_id} via {ssh_host!r}")
+        return None
+    except FileNotFoundError:
+        _log("ssh executable not found; cannot route transcript fetch")
+        return None
+    out = result.stdout or ""
+    if not out.strip().startswith("WEBVTT"):
+        if result.returncode != 0 and result.stderr:
+            first_line = result.stderr.strip().splitlines()[0]
+            _log(
+                f"SSH yt-dlp transcript via {ssh_host!r} failed for "
+                f"{video_id} (rc={result.returncode}): {first_line}"
+            )
+        return None
+    return out
+
+
 def _ytdlp_sub_langs() -> str:
     """Caption languages to try, from LAST30DAYS_YT_SUB_LANGS (default en,es,pt)."""
     raw = os.environ.get("LAST30DAYS_YT_SUB_LANGS", "").strip()
@@ -663,30 +714,23 @@ def fetch_transcript(
         Plaintext transcript string, or None if no captions available.
     """
     raw_vtt = None
-    # When SSH-routing is on, the yt-dlp transcript path would write a VTT
-    # file on the remote host that we can't easily read back. Skip it and
-    # use the HTTP transcript fallback (different YouTube endpoint, less
-    # bot-walled, works fine from datacenter IPs).
     ssh_host = _ytdlp_ssh_host()
-    use_ytdlp = is_ytdlp_installed() and not ssh_host
-    if use_ytdlp:
+    if ssh_host and is_ytdlp_installed():
+        raw_vtt = _fetch_transcript_ytdlp_via_ssh(video_id, ssh_host)
+        if not raw_vtt:
+            _log(f"SSH yt-dlp transcript failed for {video_id}, trying direct HTTP fallback")
+            raw_vtt = _fetch_transcript_direct(video_id, status=status)
+    elif is_ytdlp_installed():
         raw_vtt = _fetch_transcript_ytdlp(video_id, temp_dir, status=status)
         if not raw_vtt:
             ytdlp_error = (status or {}).get("ytdlp_error")
             if ytdlp_error:
-                # yt-dlp hit a real error (rate-limit / bot-check / timeout) —
-                # captions likely exist. The direct-HTTP fallback hits the same
-                # wall and returns an empty body that masquerades as "no
-                # captions", so skip it and surface the real reason instead.
                 _log(f"Transcript fetch failed for {video_id}: {ytdlp_error}")
                 return None
             _log(f"yt-dlp found no captions for {video_id}, trying direct HTTP fallback")
             raw_vtt = _fetch_transcript_direct(video_id, status=status)
     else:
-        if ssh_host:
-            _log("SSH-routing active, using direct HTTP transcript fetch")
-        else:
-            _log("yt-dlp not installed, using direct HTTP transcript fetch")
+        _log("yt-dlp not installed, using direct HTTP transcript fetch")
         raw_vtt = _fetch_transcript_direct(video_id, status=status)
 
     if not raw_vtt:
