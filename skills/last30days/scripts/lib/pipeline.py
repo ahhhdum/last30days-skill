@@ -1176,6 +1176,10 @@ def _retrieve_stream(
                 items = reddit.parse_reddit_response(result)
                 if items:
                     return items, {}
+                sys.stderr.write(
+                    "[Reddit] ScrapeCreators primary returned no items, "
+                    "using public fallback\n"
+                )
             except Exception as exc:
                 sys.stderr.write(
                     f"[Reddit] ScrapeCreators primary failed "
