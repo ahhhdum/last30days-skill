@@ -1853,7 +1853,7 @@ Close with `I have all the links to the {N} {source list} I pulled from. Just as
 
 - Read `references/save-html-brief.md` BEFORE proceeding to WAIT FOR USER'S RESPONSE
 - Follow that file's instructions exactly - it is the canonical source for the save flow
-- Append the confirmation line (`📎 Shareable brief saved to <path>`) to your already-emitted chat response
+- End with the artifact handoff defined there: saved HTML path, local open/view affordance when available, and a concise confirmation for explicit `--emit=html` / `--html` requests
 
 **You MUST NOT:**
 
@@ -1862,6 +1862,7 @@ Close with `I have all the links to the {N} {source list} I pulled from. Just as
 - Save to a different path than the reference specifies
 - Add data quality warnings, debug headers, or safety notes to the saved HTML
 - Re-research the topic for the HTML render - the engine cache covers the second invocation
+- Upload or publish the HTML anywhere public in this flow
 
 **Why the directive is forceful:** the reference file is the only source of truth for the save flow. Skipping it produces broken artifacts - wrong path conventions, missing synthesis content, leaked engine debug output, or warnings that don't belong in shareable docs.
 

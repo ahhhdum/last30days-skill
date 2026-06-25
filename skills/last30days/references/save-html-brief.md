@@ -2,11 +2,15 @@
 
 This reference file is loaded by the main `SKILL.md` when the user asked for an HTML brief (either explicitly via `--emit=html` / `--emit:html` / `--html`, or in natural language - "give me a shareable HTML brief", "for Slack", "for Notion", "export as HTML", etc.). The detection happens in `SKILL.md` so that the common no-HTML path stays short; the implementation lives here.
 
-The contract: the synthesis still appears in chat as the primary output. The HTML is an additional artifact saved to disk for sharing. Both happen in the same turn.
+The contract has two modes:
+
+- **Explicit HTML export** (`--emit=html`, `--emit:html`, or `--html`): the HTML artifact is the primary output. Write the synthesis to the temp file, render the HTML, then give a concise artifact handoff in chat instead of pasting the full Markdown report again.
+- **Normal report plus HTML copy** (the user asks in prose for an HTML brief while also expecting the report in chat): the synthesis still appears in chat as the primary output. The HTML is an additional artifact saved to disk for sharing. Both happen in the same turn.
 
 ## When to fire this flow
 
-- After you have already emitted the full chat response: badge, "What I learned:" (or comparison title), bold-lead-in paragraphs with citations, KEY PATTERNS list, engine footer pass-through, invitation block.
+- For normal-report-plus-HTML mode: after you have already emitted the full chat response: badge, "What I learned:" (or comparison title), bold-lead-in paragraphs with citations, KEY PATTERNS list, engine footer pass-through, invitation block.
+- For explicit-HTML-export mode: after you have drafted the synthesis that will go into the HTML, before emitting the final chat response.
 - BEFORE the WAIT FOR USER'S RESPONSE pause.
 - ONLY if the user asked. Do NOT save HTML when the user didn't ask for it.
 
@@ -66,11 +70,49 @@ fi
 #    For a scoped --hiring-signals brief, --hiring-signals MUST be here too so
 #    the footer reflects the jobs-scoped board, not a generic crawl.
 
-# 3. Append ONE line to your already-emitted chat response, after the
-#    invitation block. Use a paperclip emoji as a visible signal that an
-#    artifact was produced:
-echo "📎 Shareable brief saved to $HTML_PATH"
+# 3. Finish with the artifact handoff described below.
+printf '📎 Shareable brief saved to %s\n' "$HTML_PATH"
 ```
+
+## Chat handoff after saving
+
+Use the mode that matches the request.
+
+### Explicit HTML export
+
+When the user explicitly supplied `--emit=html`, `--emit:html`, or `--html`, do **not** paste the full Markdown report back into chat after saving the artifact. The user asked for a file; repeating the Markdown makes the run feel like a normal report with an attachment bolted on.
+
+Respond with a concise handoff:
+
+```text
+🌐 last30days v{VERSION} · synced {YYYY-MM-DD}
+
+📎 Shareable brief saved to <absolute HTML path>
+
+Open it locally:
+- macOS: `open "<absolute HTML path>"`
+- Linux: `xdg-open "<absolute HTML path>"`
+- Windows: `start "" "<absolute HTML path>"`
+
+I saved the full HTML brief locally. It is not uploaded or published anywhere.
+```
+
+If the host can safely open local files for the user and doing so matches the user's request, run the local open command after the file is written, leave the saved-path line in chat, and add `Opened locally.` If the command fails or the host is headless, do not treat that as a failed report; show the path and manual open command.
+
+### Normal report plus HTML copy
+
+When the user asked for a normal `/last30days` report and also asked for an HTML copy, keep the full chat synthesis and append this artifact block after the invitation:
+
+```text
+📎 Shareable brief saved to <absolute HTML path>
+
+Open it locally:
+- macOS: `open "<absolute HTML path>"`
+- Linux: `xdg-open "<absolute HTML path>"`
+- Windows: `start "" "<absolute HTML path>"`
+```
+
+Do not offer public publishing or upload in this flow. Hosted sharing is a separate opt-in capability and must not happen automatically.
 
 ## What ends up in the HTML file
 
@@ -91,7 +133,7 @@ Same flow when the topic is `X vs Y` (or `X vs Y vs Z`). The engine routes throu
 
 ## Follow-up turn
 
-If the user runs `/last30days OpenClaw` normally, sees the synthesis in chat, and THEN says "save that as HTML" or "give me a shareable version" in a follow-up turn, do the same save flow on the synthesis you wrote in the previous turn. Do not re-research; the synthesis is already in the conversation history. Just write it to the temp file and call the engine with `--emit=html --synthesis-file`.
+If the user runs `/last30days OpenClaw` normally, sees the synthesis in chat, and THEN says "save that as HTML" or "give me a shareable version" in a follow-up turn, do the same save flow on the synthesis you wrote in the previous turn. Do not re-research; the synthesis is already in the conversation history. Just write it to the temp file and call the engine with `--emit=html --synthesis-file`, then use the normal-report-plus-HTML artifact block.
 
 ## What NOT to do
 
@@ -99,8 +141,8 @@ If the user runs `/last30days OpenClaw` normally, sees the synthesis in chat, an
 - Do NOT add content to the temp file beyond your synthesis prose. The badge / footer / colophon come from the engine.
 - Do NOT change the file path convention. `${LAST30DAYS_MEMORY_DIR}/${SLUG}-brief.html` is the canonical location.
 - Do NOT silently overwrite an existing file. The `--emit=html` output is written via a shell redirect (`>| "$HTML_PATH"`), which OVERWRITES the collision-guarded path — use `>|` not `>` because `set -o noclobber` refuses plain `>` when the file already exists. The collision guard in step 2 handles same-topic re-runs: if `{slug}-brief.html` already exists it date-suffixes to `{slug}-brief-YYYY-MM-DD.html`. Always print whichever path the redirect actually used.
-
 - Do NOT include the data quality warning text in the temp file or in your final chat line. Warnings are an engine-stderr concern, not an artifact concern.
+- Do NOT publish, upload, or send the HTML to a third-party service. This reference only saves and opens local files.
 
 ## Edge cases
 
