@@ -24,6 +24,8 @@ def test_configuration_documents_new_safety_flags():
     flags = _parser_flags()
     assert "--no-browser-cookies" in flags
     assert "--no-browser-cookies" in text
+    assert "--preflight" in flags
+    assert "--preflight" in text
     assert "--save-dir" in text
     assert "--output" in text
 
@@ -40,4 +42,5 @@ def test_agent_is_documented_as_skill_argument_not_python_flag():
     start = text.index("## Agent Mode (--agent flag)")
     agent_section = text[start:start + 2000]
     assert "If `--agent` appears in ARGUMENTS" in agent_section
-    assert "Skill tool" in text
+    assert "slash-command skill contract" in text
+    assert "not a Python CLI flag" in text

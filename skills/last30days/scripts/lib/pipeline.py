@@ -26,6 +26,7 @@ from . import (
     instagram,
     jobs,
     normalize,
+    permission_preflight,
     perplexity,
     pinterest,
     planner,
@@ -204,21 +205,13 @@ def diagnose(
         "reads_values": False if safe else config.get("_BROWSER_COOKIE_MODE") == "read",
     }
     ignored_project_keys = list(config.get("_IGNORED_PROJECT_CONFIG_KEYS") or [])
-    endpoint_override_keys = {
-        "BSKY_SEARCH_HOST",
-        "LAST30DAYS_SEARXNG_URL",
-        "LAST30DAYS_YOUTUBE_SSH_HOST",
-        "OPENAI_BASE_URL",
-        "XAI_BASE_URL",
-        "XIAOHONGSHU_API_BASE",
-    }
     ignored_endpoint_overrides = [
-        key for key in ignored_project_keys if key in endpoint_override_keys
+        key for key in ignored_project_keys if key in permission_preflight.ENDPOINT_OVERRIDE_KEYS
     ]
     local_writes: list[dict[str, str]] = []
     if config.get("LAST30DAYS_MEMORY_DIR"):
         local_writes.append({"kind": "report", "path": str(config.get("LAST30DAYS_MEMORY_DIR"))})
-    return {
+    diag = {
         "providers": providers_status,
         "local_mode": not reasoning_provider_available,
         "reasoning_provider": (config.get("LAST30DAYS_REASONING_PROVIDER") or "auto").lower(),
@@ -244,6 +237,8 @@ def diagnose(
         "credential_destinations": credential_destinations,
         "local_writes": local_writes,
     }
+    diag["permission_preflight"] = permission_preflight.build(config, diag)
+    return diag
 
 
 def _inner_max_workers(stream_count: int, *, internal_subrun: bool) -> int:

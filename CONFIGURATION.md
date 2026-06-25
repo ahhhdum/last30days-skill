@@ -45,6 +45,7 @@ The engine's `.env` reader doesn't expand `$HOME` — only the tilde, via `Path(
 - `--output <file>` - write the rendered output to an exact file path, using the format selected by `--emit`.
 - `--save-suffix <name>` - distinguish runs of the same topic (e.g. per client: `--save-suffix=acme`).
 - `--no-browser-cookies` - hard-disable browser-cookie extraction for this run, even when `FROM_BROWSER` is configured. MCP and folder-mode hosts use this for safe defaults.
+- `--preflight` - print a human-readable permission preflight. It reports config source, project config trust/ignore state, browser-cookie plan, planned writes, optional commands, source availability, and endpoint overrides without reading browser cookies, writing setup/config/report files, or running research. Add `--emit=json` for machine-readable preflight JSON; use `--diagnose` when you need the full source diagnostic JSON.
 
 The footer line `📎 Raw results saved to ${LAST30DAYS_MEMORY_DIR:-$HOME/Documents/Last30Days}/<slug>-raw.md` is the canonical pointer; if it shows backslashes on Windows update past v3.1.1.
 
@@ -144,7 +145,7 @@ BSKY_APP_PASSWORD=<your-app-password>
 
 After editing: `chmod 600 ~/.config/last30days/.env` (or `chmod 600 .claude/last30days.env` if using the project-scoped variant).
 
-**Troubleshooting:** if a source you expected to see isn't appearing in results, run `python3 scripts/last30days.py --diagnose`. It prints a safe preflight report for source availability, config source, browser-cookie plan, external command availability, write destinations, and ignored untrusted project config without reading browser cookies or running live provider probes.
+**Troubleshooting:** if a source you expected to see isn't appearing in results, run `python3 scripts/last30days.py --preflight` for a human permission summary or `python3 scripts/last30days.py --diagnose` for full JSON diagnostics. Both are safe: they report source availability, config source, browser-cookie plan, external command availability, write destinations, and ignored untrusted project config without reading browser cookies or running live provider probes.
 
 ### Perplexity source modes
 

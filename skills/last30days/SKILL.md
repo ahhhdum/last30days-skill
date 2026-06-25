@@ -475,19 +475,21 @@ For hosts without interactive modal prompts (OpenClaw, Codex, Cursor, Gemini CLI
 
 **1. Welcome.** One short branded line, e.g.: `Welcome to /last30days - let me get you set up (about 30 seconds).`
 
-**2. Cookie consent (ask BEFORE reading anything).** First check if `BROWSER_CONSENT=true` already exists in `~/.config/last30days/.env` (e.g. granted in a prior Claude Code session); if so, skip this prompt and run `setup --allow-browser-cookies` directly. Otherwise ask. Example: `I can read your browser cookies (Firefox/Safari) to unlock X/Twitter and other logged-in sources. Want me to? (yes / no)` **Wait for the answer.**
+**2. Permission preflight.** Run `${LAST30DAYS_PYTHON:-python3} "${SKILL_DIR}/scripts/last30days.py" --preflight` using the directory of the `SKILL.md` you loaded, then summarize the human-readable result before setup: config source, project config trust/ignore state, planned browser-cookie mode, planned writes, optional commands, and active/ignored endpoint overrides. This is safe: it does not read browser-cookie values, does not write setup/config/report files, and does not run research. For Codex desktop and other folder-mode hosts, if hidden `.claude/last30days.env` project config is shown as ignored, tell the user it remains ignored unless `LAST30DAYS_TRUST_PROJECT_CONFIG=1` is set from the process environment or global config. Do not block normal research on missing optional commands; describe them as optional coverage.
+
+**3. Cookie consent (ask BEFORE reading anything).** First check if `BROWSER_CONSENT=true` already exists in `~/.config/last30days/.env` (e.g. granted in a prior Claude Code session); if so, skip this prompt and run `setup --allow-browser-cookies` directly. Otherwise ask. Example: `I can read your browser cookies (Firefox/Safari) to unlock X/Twitter and other logged-in sources. Want me to? (yes / no)` **Wait for the answer.**
    - On **yes** → run `python3 skills/last30days/scripts/last30days.py setup --allow-browser-cookies` (and append `BROWSER_CONSENT=true` to `.env` after it completes). Extracts cookies (Firefox/Safari, never Chrome unless `FROM_BROWSER=auto` or a named Chromium browser was explicitly configured) and best-effort installs yt-dlp (YouTube) and the free, keyless Digg CLI (`digg-pp-cli` via `@mvanhorn/printing-press-library install digg --cli-only`; activates only when on the agent subprocess PATH, typically `$HOME/.local/bin`; reports honestly if off-PATH; recommend-only if `npx` is unavailable).
    - On **no** → run `FROM_BROWSER=off python3 skills/last30days/scripts/last30days.py setup`. Skips all cookie reads; still installs yt-dlp and Digg, still writes `SETUP_COMPLETE`.
 
-**3. Full Disk Access remediation (macOS only).** After `setup`, inspect stderr. If it contains `Permission denied reading Cookies.binarycookies` on macOS, surface: `macOS blocked the cookie read. To enable X/Twitter: System Settings > Privacy & Security > Full Disk Access > enable your terminal (or the Claude app), then I can retry.` Offer ONE retry. If skipped, continue.
+**4. Full Disk Access remediation (macOS only).** After `setup`, inspect stderr. If it contains `Permission denied reading Cookies.binarycookies` on macOS, surface: `macOS blocked the cookie read. To enable X/Twitter: System Settings > Privacy & Security > Full Disk Access > enable your terminal (or the Claude app), then I can retry.` Offer ONE retry. If skipped, continue.
 
-**4. ScrapeCreators signup offer (every first run, consent BEFORE launching the browser).** Explain it grants 10,000 free calls that unlock TikTok, Instagram, YouTube comments, plus a Reddit backup and a YouTube transcript fallback, and that it opens a GitHub authorization page. Ask, e.g.: `Want to unlock TikTok, Instagram, and more? I can sign you up for ScrapeCreators with GitHub (10,000 free calls) - it opens a browser to authorize. (yes / no)` **Wait for the answer.**
+**5. ScrapeCreators signup offer (every first run, consent BEFORE launching the browser).** Explain it grants 10,000 free calls that unlock TikTok, Instagram, YouTube comments, plus a Reddit backup and a YouTube transcript fallback, and that it opens a GitHub authorization page. Ask, e.g.: `Want to unlock TikTok, Instagram, and more? I can sign you up for ScrapeCreators with GitHub (10,000 free calls) - it opens a browser to authorize. (yes / no)` **Wait for the answer.**
    - On **yes** → run `python3 skills/last30days/scripts/last30days.py setup --github`. A browser window opens; the user authorizes with the code shown. On success the engine persists the key automatically and returns `"persisted": true` with a MASKED `api_key` (never ask for or echo the raw key). Confirm the paid sources are active.
    - On **success but `"persisted": false`** (auth completed yet the key write failed) → do NOT claim sources are active. Tell the user signup worked but saving failed, and have them add `SCRAPECREATORS_API_KEY=<key>` to `~/.config/last30days/.env` manually (the raw key is masked in output, so re-run `setup --github` or retrieve it from scrapecreators.com to get the value).
    - On **timeout / denied** → tell the user it didn't complete and offer to retry or skip.
    - On **no** → note they can run it later by asking to set up ScrapeCreators, then continue.
 
-**5. Complete.** Once `SETUP_COMPLETE=true` is written, briefly confirm which sources are now active (read the `setup --github` JSON `persisted` field, or re-run safe `--diagnose`) and proceed to research. For Codex desktop, Cursor, Gemini CLI, and raw folder-mode hosts, hidden `.claude/last30days.env` project config is ignored unless `LAST30DAYS_TRUST_PROJECT_CONFIG=1` is set from the process environment or global config; do not tell the user a project file is active unless diagnose reports it as the config source.
+**6. Complete.** Once `SETUP_COMPLETE=true` is written, briefly confirm which sources are now active (read the `setup --github` JSON `persisted` field, re-run `--preflight` for a human permission summary, or re-run safe `--diagnose` for JSON) and proceed to research. For Codex desktop, Cursor, Gemini CLI, and raw folder-mode hosts, hidden `.claude/last30days.env` project config is ignored unless `LAST30DAYS_TRUST_PROJECT_CONFIG=1` is set from the process environment or global config; do not tell the user a project file is active unless diagnose reports it as the config source.
 
 ---
 
@@ -1974,7 +1976,7 @@ Want another prompt? Just tell me what you're creating next.
 **What this skill does:**
 - Sends search queries to ScrapeCreators API (`api.scrapecreators.com`) for TikTok and Instagram search, and as a Reddit backup when public Reddit is unavailable (requires SCRAPECREATORS_API_KEY)
 - Legacy: Sends search queries to OpenAI's Responses API (`api.openai.com`) for Reddit discovery (fallback if no SCRAPECREATORS_API_KEY)
-- Sends search queries to Twitter's GraphQL API (via optional user-provided AUTH_TOKEN/CT0 env vars - no browser session access), xAI's API (`api.x.ai`), Xquik's API (`xquik.com`), or the official X API v2 via xurl CLI (OAuth2, auto-detected when installed and authenticated) for X search
+- Sends search queries to X/Twitter via optional user-provided `AUTH_TOKEN`/`CT0` env vars, explicit browser-cookie opt-in (`FROM_BROWSER` or setup consent), xAI's API (`api.x.ai` by default), Xquik's API (`xquik.com` by default), or the official X API v2 via xurl CLI (OAuth2, auto-detected when installed and authenticated)
 - Sends search queries to Algolia HN Search API (`hn.algolia.com`) for Hacker News story and comment discovery (free, no auth)
 - Sends search queries to Polymarket Gamma API (`gamma-api.polymarket.com`) for prediction market discovery (free, no auth)
 - Runs `yt-dlp` locally for YouTube search and transcript extraction (no API key, public data)
@@ -1983,16 +1985,18 @@ Want another prompt? Just tell me what you're creating next.
 - Fetches public Reddit thread data from `reddit.com` for engagement metrics
 - Stores research findings in local SQLite database (watchlist mode only)
 - Saves research briefings as .md files to `LAST30DAYS_MEMORY_DIR` (defaults to `~/Documents/Last30Days`)
+- Provides `--preflight` for a safe human-readable permission summary before research; it does not read browser-cookie values, write files, or run live research
 
 **What this skill does NOT do:**
 - Does not post, like, or modify content on any platform
-- Does not access your Reddit, X, or YouTube accounts
-- Does not share API keys between providers (OpenAI key only goes to api.openai.com, etc.)
+- Does not access browser cookies unless explicitly configured or consented (`FROM_BROWSER`, manual X cookies, or setup with `--allow-browser-cookies`); `--preflight` and `--diagnose` do not read browser-cookie values
+- Does not use Codex ChatGPT auth as an OpenAI provider credential
+- Does not share API keys between providers
 - Does not log, cache, or write API keys to output files
-- Does not send data to any endpoint not listed above
+- Endpoint destinations follow configured provider base URLs; `--preflight` reports active and ignored endpoint overrides without printing secrets
 - Hacker News and Polymarket sources are always available (no API key, no binary dependency)
 - TikTok and Instagram sources require SCRAPECREATORS_API_KEY (10,000 free calls, then PAYG). Reddit uses ScrapeCreators only as a backup when public Reddit is unavailable.
-- Can be invoked autonomously by agents via the Skill tool (runs inline, not forked); pass `--agent` for non-interactive report output
+- Agent hosts invoke the slash-command skill contract; if `--agent` appears in the user's slash-command arguments, treat it as skill-level mode guidance, not a Python CLI flag.
 
 **Bundled scripts:** `scripts/last30days.py` (main research engine), `scripts/lib/` (search, enrichment, rendering modules), `scripts/lib/vendor/bird-search/` (vendored X search client, MIT licensed)
 

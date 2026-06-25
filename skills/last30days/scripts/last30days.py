@@ -47,7 +47,7 @@ if os.name == "nt":
 SCRIPT_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(SCRIPT_DIR))
 
-from lib import dates, env, html_render, pipeline, render, schema, ui
+from lib import dates, env, html_render, permission_preflight, pipeline, render, schema, ui
 
 _child_pids: set[int] = set()
 _child_pids_lock = threading.Lock()
@@ -293,6 +293,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--debug", action="store_true", help="Enable HTTP debug logging")
     parser.add_argument("--mock", action="store_true", help="Use mock retrieval fixtures")
     parser.add_argument("--diagnose", action="store_true", help="Print provider and source availability")
+    parser.add_argument("--preflight", action="store_true",
+                        help="Print a safe human-readable permission preflight")
+    parser.add_argument("--preflight-report-on-save-dir", help=argparse.SUPPRESS)
     parser.add_argument("--no-browser-cookies", action="store_true",
                         help="Disable browser-cookie extraction even when FROM_BROWSER is configured")
     parser.add_argument("--save-dir", help="Optional directory for saving the rendered output")
@@ -638,6 +641,7 @@ def _setup_allows_browser_cookies(args: argparse.Namespace, extra_argv: list[str
     return (
         not args.no_browser_cookies
         and not args.diagnose
+        and not args.preflight
         and "--allow-browser-cookies" in extra_argv
     )
 
@@ -683,7 +687,7 @@ def _validate_extra_argv(parser: argparse.ArgumentParser, topic: str, extra_argv
 def _config_policy_for_args(args: argparse.Namespace, topic: str, extra_argv: list[str]) -> env.ConfigLoadPolicy:
     if args.no_browser_cookies:
         browser_mode = "off"
-    elif args.diagnose:
+    elif args.diagnose or args.preflight:
         browser_mode = "plan_only"
     elif topic.lower() == "setup":
         browser_mode = "read" if _setup_allows_browser_cookies(args, extra_argv) else "off"
@@ -691,7 +695,7 @@ def _config_policy_for_args(args: argparse.Namespace, topic: str, extra_argv: li
         browser_mode = "read"
     return env.ConfigLoadPolicy(
         browser_cookies=browser_mode,
-        inspect_ignored_project_config=args.diagnose,
+        inspect_ignored_project_config=args.diagnose or args.preflight,
     )
 
 
@@ -723,6 +727,21 @@ def main() -> int:
     # datacenter IPs (see lib/youtube_yt.py for details).
     if config.get("LAST30DAYS_YOUTUBE_SSH_HOST") and "LAST30DAYS_YOUTUBE_SSH_HOST" not in os.environ:
         os.environ["LAST30DAYS_YOUTUBE_SSH_HOST"] = config["LAST30DAYS_YOUTUBE_SSH_HOST"]
+
+    if args.preflight:
+        requested_sources = resolve_requested_sources(args.search, config)
+        diag = pipeline.diagnose(config, requested_sources, safe=True)
+        preflight = permission_preflight.build(
+            config,
+            diag,
+            planned_save_dir=args.save_dir,
+            report_on_save_dir=args.preflight_report_on_save_dir,
+        )
+        if args.emit == "json":
+            print(json.dumps(preflight, indent=2, sort_keys=True))
+        else:
+            print(permission_preflight.render_text(preflight), end="")
+        return 0
 
     # Handle setup subcommand
     if topic.lower() == "setup":
