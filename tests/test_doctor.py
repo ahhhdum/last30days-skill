@@ -565,8 +565,13 @@ class YoutubeTranscriptionNote(unittest.TestCase):
 
     def test_text_line_includes_the_fix_on_the_ok_line(self):
         text = doctor.render_text(self.report)
+        # Located by source name, not glyph: the four-state audit sorts a
+        # no-run-evidence ok source to UNVERIFIED, but the transcription fix
+        # must still ride the youtube line.
         line = next(
-            l for l in text.splitlines() if l.strip().startswith("✓ youtube")
+            l
+            for l in text.splitlines()
+            if " youtube" in l and "search + transcripts work" in l
         )
         self.assertIn("search + transcripts work", line)
         self.assertIn(f"fix: {self.entry.fix_nl}", line)
@@ -676,13 +681,18 @@ class NativeSearchHost(unittest.TestCase):
 
 
 class TextReport(unittest.TestCase):
-    """Grouped text rendering: ready / degraded / off / error."""
+    """Grouped text rendering: four-state audit."""
 
     def test_groups_and_lines(self):
         report = _build({}, probe_map={"yt-dlp": health.BROKEN})
         text = doctor.render_text(report)
         self.assertIn("last30days doctor", text)
-        for header in ("Ready", "Degraded", "Off", "Errors"):
+        for header in (
+            "WORKING",
+            "TURNED ON - UNVERIFIED",
+            "NOT WORKING",
+            "COULD BE ON",
+        ):
             self.assertIn(header, text)
         # One line per source: glyph + source name; fix on non-ok lines.
         self.assertIn("reddit", text)
@@ -790,6 +800,79 @@ class RunEvidenceOverlay(unittest.TestCase):
         self.assertIsNone(report["sources"]["youtube"]["run_outcome"])
         self.assertTrue(report["run_evidence"]["present"])
         self.assertFalse(report["run_evidence"]["fresh"])
+
+
+class FourStateAudit(unittest.TestCase):
+    """U2: audit_state derivation + grouped render."""
+
+    def test_keyless_ok_no_evidence_is_working(self):
+        rec = {"tier": "ok", "status": "ok"}
+        self.assertEqual(doctor.AUDIT_WORKING, doctor.audit_state("reddit", rec))
+
+    def test_configured_ok_no_evidence_is_unverified(self):
+        rec = {"tier": "ok", "status": "ok"}
+        self.assertEqual(doctor.AUDIT_UNVERIFIED, doctor.audit_state("tiktok", rec))
+
+    def test_fresh_run_items_is_working(self):
+        rec = {"tier": "ok", "status": "ok"}
+        ro = {"state": "ok", "items_returned": 13}
+        self.assertEqual(doctor.AUDIT_WORKING, doctor.audit_state("tiktok", rec, ro))
+
+    def test_fresh_run_error_is_not_working(self):
+        rec = {"tier": "ok", "status": "ok"}
+        ro = {"state": "error", "items_returned": 0, "detail": "HTTP 500"}
+        self.assertEqual(
+            doctor.AUDIT_NOT_WORKING, doctor.audit_state("youtube", rec, ro)
+        )
+
+    def test_fresh_run_partial_is_unverified(self):
+        rec = {"tier": "ok", "status": "ok"}
+        ro = {"state": "partial", "items_returned": 8, "detail": "HTTP 400"}
+        self.assertEqual(
+            doctor.AUDIT_UNVERIFIED, doctor.audit_state("instagram", rec, ro)
+        )
+
+    def test_off_tier_is_could_be_on(self):
+        rec = {"tier": "off", "status": "opt-in"}
+        self.assertEqual(
+            doctor.AUDIT_COULD_BE_ON, doctor.audit_state("threads", rec)
+        )
+
+    def test_probe_result_decides_when_no_run(self):
+        rec = {"tier": "ok", "status": "ok"}
+        self.assertEqual(
+            doctor.AUDIT_WORKING, doctor.audit_state("tiktok", rec, None, {"ok": True})
+        )
+        self.assertEqual(
+            doctor.AUDIT_NOT_WORKING,
+            doctor.audit_state("tiktok", rec, None, {"ok": False}),
+        )
+
+    def test_render_json_keeps_legacy_keys_and_adds_audit(self):
+        report = _build({})
+        for name, rec in report["sources"].items():
+            self.assertIn("tier", rec, name)
+            self.assertIn("status", rec, name)
+            self.assertIn("audit_state", rec, name)
+        self.assertEqual("config", report["mode"])
+        blob = json.loads(doctor.render_json(report))
+        self.assertIn("mode", blob)
+        self.assertIn("audit_state", blob["sources"]["github"])
+
+    def test_every_source_its_own_line(self):
+        text = doctor.render_text(_build({}))
+        self.assertRegex(text, r"[●◐✕○] github")
+
+    def test_working_line_shows_item_count(self):
+        tmp = tempfile.mkdtemp()
+        path = _write_last_report(
+            tmp, source_status={"reddit": {"state": "ok", "items_returned": 13}}
+        )
+        with _Hermetic(), mock.patch(
+            "lib.doctor._last_report_path", return_value=path
+        ):
+            text = doctor.render_text(doctor.build_report({}))
+        self.assertIn("13 items last run", text)
 
 
 if __name__ == "__main__":

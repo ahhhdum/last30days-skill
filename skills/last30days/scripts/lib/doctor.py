@@ -79,6 +79,74 @@ GROUP_HEADERS = (
     (TIER_ERROR, "Errors"),
 )
 
+# Four-state audit (R1). A presentation layer derived from the tier rollup +
+# last-run evidence + optional live probe - it augments the per-source records,
+# it does not replace them (the tier/status fields stay in the record and JSON).
+AUDIT_WORKING = "working"
+AUDIT_UNVERIFIED = "unverified"
+AUDIT_NOT_WORKING = "not-working"
+AUDIT_COULD_BE_ON = "could-be-on"
+
+AUDIT_GLYPHS = {
+    AUDIT_WORKING: "●",       # ●
+    AUDIT_UNVERIFIED: "◐",    # ◐
+    AUDIT_NOT_WORKING: "✕",   # ✕
+    AUDIT_COULD_BE_ON: "○",   # ○
+}
+
+AUDIT_GROUPS = (
+    (AUDIT_WORKING, "WORKING"),
+    (AUDIT_UNVERIFIED, "TURNED ON - UNVERIFIED"),
+    (AUDIT_NOT_WORKING, "NOT WORKING"),
+    (AUDIT_COULD_BE_ON, "COULD BE ON"),
+)
+
+# Sources that need neither credentials nor a CLI: they always serve, so with
+# no run evidence and no probe they are WORKING, not UNVERIFIED.
+KEYLESS_ALWAYS_ON = frozenset(
+    {"reddit", "hackernews", "polymarket", "github", "library"}
+)
+
+# Fresh-run outcome states -> audit bucket for a tier-ok source. Anything not
+# listed here (error / timeout / rate-limited / auth-failed / unreachable /
+# schema-drift) means the source ran and failed -> NOT WORKING.
+_RUN_WORKING_STATES = frozenset({health.OK, health.NO_RESULTS})
+_RUN_UNVERIFIED_STATES = frozenset({health.PARTIAL, health.SKIPPED_UNCONFIGURED})
+
+
+def audit_state(
+    name: str,
+    record: Dict[str, Any],
+    run_outcome: Optional[Dict[str, Any]] = None,
+    probe_result: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Map a source's (tier, run evidence, probe) to one of four audit states.
+
+    Precedence: a failing/degraded tier is NOT WORKING regardless of history;
+    an off tier (opt-in / unconfigured) is COULD BE ON. For a tier-ok source,
+    fresh run evidence wins (ok/no-results -> WORKING; partial/skipped ->
+    UNVERIFIED; any error/timeout/rate-limit/etc -> NOT WORKING), then a live
+    probe, then the keyless-always-on fallback, else UNVERIFIED.
+    """
+    tier = record.get("tier")
+    if tier in (TIER_ERROR, TIER_WARN):
+        return AUDIT_NOT_WORKING
+    if tier == TIER_OFF:
+        return AUDIT_COULD_BE_ON
+    # tier ok
+    if run_outcome:
+        state = run_outcome.get("state")
+        if state in _RUN_WORKING_STATES:
+            return AUDIT_WORKING
+        if state in _RUN_UNVERIFIED_STATES:
+            return AUDIT_UNVERIFIED
+        return AUDIT_NOT_WORKING
+    if probe_result is not None:
+        return AUDIT_WORKING if probe_result.get("ok") else AUDIT_NOT_WORKING
+    if name in KEYLESS_ALWAYS_ON:
+        return AUDIT_WORKING
+    return AUDIT_UNVERIFIED
+
 # Report order: chained sources first, then free, then key-gated/opt-in.
 SOURCE_ORDER = (
     "reddit",
@@ -739,9 +807,12 @@ def build_report(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # U1: overlay the last research run's per-source outcome onto each record
     # so the audit layer can tell "configured" from "actually working".
+    # U2: derive each record's four-state audit bucket (probe evidence, when a
+    # live probe runs, is layered on in run() before render).
     evidence = load_run_evidence(config)
     for source, record in sources.items():
         record["run_outcome"] = evidence["outcomes"].get(source) if evidence["fresh"] else None
+        record["audit_state"] = audit_state(source, record, record["run_outcome"])
 
     # Sequential on purpose: the permission preflight composes pipeline
     # diagnostics and must not race the source builders.
@@ -759,6 +830,7 @@ def build_report(config: Dict[str, Any]) -> Dict[str, Any]:
         "setup": _setup_block(config),
         "permissions": permissions,
         "sources": sources,
+        "mode": "config",
         "run_evidence": {
             "present": evidence["present"],
             "fresh": evidence["fresh"],
@@ -776,24 +848,75 @@ def render_json(report: Dict[str, Any]) -> str:
     return json.dumps(report, indent=2, sort_keys=True)
 
 
-def _source_line(name: str, record: Dict[str, Any]) -> str:
-    glyph = GLYPHS.get(record["tier"], "?")
-    parts = [f"  {glyph} {name}"]
+def _cli_marker(record: Dict[str, Any]) -> str:
+    """Inline `[CLI: name ✓]` / `[keyless]` marker (populated by U3)."""
+    cli = record.get("cli")
+    if not cli:
+        return ""
+    name = cli.get("name")
+    if cli.get("status") == health.OK:
+        return f" [CLI: {name} ✓]"
+    if cli.get("off_path"):
+        return f" [CLI: {name} ✗ off-PATH]"
+    return f" [CLI: {name} ✗ {cli.get('status')}]"
+
+
+def _run_evidence_suffix(record: Dict[str, Any], state: str) -> str:
+    """Last-run outcome tail for a source line (R4)."""
+    ro = record.get("run_outcome")
+    if not ro:
+        if state == AUDIT_UNVERIFIED:
+            return "  [no recent run]"
+        return ""
+    st = ro.get("state")
+    count = ro.get("items_returned") or 0
+    detail = ro.get("detail")
+    if st in _RUN_WORKING_STATES:
+        if count:
+            return f"  [✓ {count} items last run]"
+        return "  [✓ ran clean, 0 matches last run]"
+    if st == health.PARTIAL:
+        tail = f" ({detail})" if detail else ""
+        return f"  [⚠ partial last run{tail}]"
+    tail = detail or st
+    return f"  [✕ {tail} last run]"
+
+
+def _audit_source_line(name: str, record: Dict[str, Any], state: str) -> str:
+    glyph = AUDIT_GLYPHS.get(state, "?")
+    parts = [f"  {glyph} {name}{_cli_marker(record)}"]
     descriptors: List[str] = []
-    if record["status"] not in (health.OK,):
+    if record.get("status") not in (health.OK,):
         descriptors.append(record["status"])
     if record.get("note"):
         descriptors.append(record["note"])
-    elif record.get("detail") and record["tier"] != TIER_OK:
+    elif record.get("detail") and record.get("tier") != TIER_OK:
         descriptors.append(record["detail"])
     if descriptors:
         parts.append(" — " + "; ".join(descriptors))
+    evidence = _run_evidence_suffix(record, state)
+    if evidence:
+        parts.append(evidence)
     # fix is only ever populated when there is something actionable, so
     # render it whenever present — an ok-tier record can carry one (the
     # youtube transcription-key note) and must not lose it in text mode.
     if record.get("fix"):
         parts.append(f"; fix: {record['fix']}")
+    # Backup / comment sub-lanes render on their own indented lines (U7),
+    # after the primary line (with its fix) is complete.
+    for sub in _sub_lane_lines(record):
+        parts.append("\n" + sub)
     return "".join(parts)
+
+
+def _sub_lane_lines(record: Dict[str, Any]) -> List[str]:
+    """Indented backup/comment sub-lane lines under a source (populated by U7)."""
+    return []
+
+
+def _cli_health_lines(report: Dict[str, Any]) -> List[str]:
+    """Dedicated CLI-health block (populated by U3)."""
+    return []
 
 
 def render_text(report: Dict[str, Any]) -> str:
@@ -824,18 +947,37 @@ def render_text(report: Dict[str, Any]) -> str:
             + (f"; browser cookies: {browser.get('status')}" if browser else "")
         )
 
-    grouped: Dict[str, List[str]] = {tier: [] for tier, _ in GROUP_HEADERS}
-    for name, record in (report.get("sources") or {}).items():
-        grouped.setdefault(record["tier"], []).append(_source_line(name, record))
+    run_ev = report.get("run_evidence") or {}
+    if run_ev.get("present") and run_ev.get("fresh"):
+        topic = run_ev.get("topic") or "last run"
+        lines.append(
+            f"last run: {topic} - overlaying actual source outcomes below"
+        )
+    elif run_ev.get("present"):
+        lines.append(
+            "last run: found but stale - run `doctor --postmortem` to inspect it"
+        )
 
-    for tier, header in GROUP_HEADERS:
-        entries = grouped.get(tier) or []
+    grouped: Dict[str, List[str]] = {state: [] for state, _ in AUDIT_GROUPS}
+    for name, record in (report.get("sources") or {}).items():
+        state = record.get("audit_state") or audit_state(
+            name, record, record.get("run_outcome")
+        )
+        grouped.setdefault(state, []).append(_audit_source_line(name, record, state))
+
+    for state, header in AUDIT_GROUPS:
+        entries = grouped.get(state) or []
         lines.append("")
-        lines.append(f"{header}:")
+        lines.append(f"{AUDIT_GLYPHS.get(state, '')} {header}:")
         if entries:
             lines.extend(entries)
         else:
             lines.append("  (none)")
+
+    cli_block = _cli_health_lines(report)
+    if cli_block:
+        lines.append("")
+        lines.extend(cli_block)
 
     lines.append("")
     lines.append(
