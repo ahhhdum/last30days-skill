@@ -201,22 +201,6 @@ def test_x_velocity_excludes_views_and_bookmarks():
     ) == rerank.engagement_velocity_score(standard_item, as_of_date="2026-07-10")
 
 
-def test_discovery_topic_name_uses_entities_shared_across_sources():
-    reddit = _candidate(_item("r1", "reddit", "OpenAI Agent SDK launch details"))
-    hn = _candidate(_item("h1", "hackernews", "OpenAI Agent SDK reaches developers"))
-    candidates = {reddit.candidate_id: reddit, hn.candidate_id: hn}
-    cluster = schema.Cluster(
-        cluster_id="cluster-1",
-        title=reddit.title,
-        candidate_ids=list(candidates),
-        representative_ids=[reddit.candidate_id],
-        sources=["hackernews", "reddit"],
-        score=80,
-    )
-
-    assert pipeline.discovery_topic_name(cluster, candidates, "AI agents") == "OpenAI Agent SDK"
-
-
 def test_discovery_renderer_snapshot():
     report = schema.DiscoveryReport(
         domain="AI agents",
@@ -427,10 +411,17 @@ def test_discovery_cli_json_contract_and_mutual_exclusion():
     )
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert payload["schema_version"] == "1.0"
+    assert payload["schema_version"] == "1.1"
     assert payload["kind"] == "discovery"
     assert 5 <= len(payload["results"]) <= 10
     assert payload["results"][0]["command"].startswith('/last30days "')
+    # 1.1 fields ship in every result, with defaults when nothing set them.
+    for topic in payload["results"]:
+        assert topic["podcast_angle"] is None
+        assert topic["x_article_angle"] is None
+        assert topic["previously_surfaced_count"] == 0
+        assert topic["last_surfaced"] is None
+        assert topic["covered"] is False
 
     invalid = subprocess.run(
         [
@@ -466,6 +457,106 @@ def test_discovery_cli_json_contract_and_mutual_exclusion():
     )
     assert drill_conflict.returncode == 2
     assert "mutually exclusive" in drill_conflict.stderr
+
+
+def _discovery_report(topic: schema.DiscoveryTopic) -> schema.DiscoveryReport:
+    return schema.DiscoveryReport(
+        domain="AI agents",
+        range_from="2026-06-10",
+        range_to="2026-07-10",
+        generated_at="2026-07-10T00:00:00+00:00",
+        plan=schema.DiscoveryPlan(
+            domain="AI agents",
+            category="ai_agent_framework",
+            subreddits=["AI_Agents"],
+            sources=["reddit", "hackernews"],
+        ),
+        topics=[topic],
+    )
+
+
+def test_discovery_export_round_trips_angles_and_queue_annotations():
+    """The 1.1 fields must carry real values through to_discovery_export."""
+    payload = schema.to_discovery_export(_discovery_report(schema.DiscoveryTopic(
+        rank=1,
+        name="Agent memory protocols",
+        why_spiking="Two independent listing items accelerated this week.",
+        momentum="new-this-week",
+        velocity_score=123.45,
+        sources=["hackernews", "reddit"],
+        engagement_by_source={"reddit": {"score": 120, "num_comments": 30}},
+        command='/last30days "Agent memory protocols"',
+        podcast_angle="Why agent memory is the next context-window fight",
+        x_article_angle="Agent memory protocols, explained through this week's launches",
+        previously_surfaced_count=2,
+        last_surfaced="2026-07-03",
+        covered=True,
+    )))
+
+    assert payload["schema_version"] == "1.1"
+    result = payload["results"][0]
+    assert result["podcast_angle"] == "Why agent memory is the next context-window fight"
+    assert result["x_article_angle"] == (
+        "Agent memory protocols, explained through this week's launches"
+    )
+    assert result["previously_surfaced_count"] == 2
+    assert result["last_surfaced"] == "2026-07-03"
+    assert result["covered"] is True
+
+
+def test_discovery_topic_constructs_with_only_pre_existing_fields():
+    """Pre-1.1 constructor calls must keep working; new fields default."""
+    topic = schema.DiscoveryTopic(
+        rank=1,
+        name="Agent memory protocols",
+        why_spiking="Two independent listing items accelerated this week.",
+        momentum="building",
+        velocity_score=10.0,
+        sources=["reddit"],
+        engagement_by_source={"reddit": {"score": 120}},
+        command='/last30days "Agent memory protocols"',
+    )
+
+    assert topic.podcast_angle is None
+    assert topic.x_article_angle is None
+    assert topic.previously_surfaced_count == 0
+    assert topic.last_surfaced is None
+    assert topic.covered is False
+
+    result = schema.to_discovery_export(_discovery_report(topic))["results"][0]
+    assert result["podcast_angle"] is None
+    assert result["x_article_angle"] is None
+    assert result["previously_surfaced_count"] == 0
+    assert result["last_surfaced"] is None
+    assert result["covered"] is False
+
+
+def test_discovery_cli_mock_render_has_no_angle_or_pipeline_lines():
+    """--mock runs never resolve a reasoning provider, so rendered cards must
+    omit the U5 angle and Pipeline lines entirely - and stay deterministic
+    across runs (same-day mock fixtures)."""
+    def _run_once() -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [
+                sys.executable,
+                "skills/last30days/scripts/last30days.py",
+                "--discover",
+                "AI agents",
+                "--mock",
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    first = _run_once()
+    second = _run_once()
+    assert first.returncode == 0, first.stderr
+    assert "**Podcast angle:**" not in first.stdout
+    assert "**X article angle:**" not in first.stdout
+    assert "**Pipeline:**" not in first.stdout
+    assert first.stdout == second.stdout
 
 
 def test_discovery_cli_bare_discover_is_global_trending():
@@ -743,6 +834,333 @@ def test_x_discovery_preserves_producing_backends_own_error(monkeypatch):
     )
     assert len(items) == 1
     assert error == "rate limited after page 1"
+
+
+# --- U6 persistent topic queue: discovery persistence hook + queue CLI -------
+
+
+def _queue_topic(rank: int, name: str) -> schema.DiscoveryTopic:
+    return schema.DiscoveryTopic(
+        rank=rank,
+        name=name,
+        why_spiking=f"Listing evidence about {name}.",
+        momentum="building",
+        velocity_score=42.5,
+        sources=["reddit"],
+        engagement_by_source={"reddit": {"score": 120}},
+        command=f'/last30days "{name}"',
+    )
+
+
+def _queue_report(names: list[str]) -> schema.DiscoveryReport:
+    return schema.DiscoveryReport(
+        domain="AI agents",
+        range_from="2026-06-20",
+        range_to="2026-07-20",
+        generated_at="2026-07-20T00:00:00+00:00",
+        plan=schema.DiscoveryPlan(
+            domain="AI agents", category=None, subreddits=["all"],
+            sources=["reddit"],
+        ),
+        topics=[_queue_topic(rank, name) for rank, name in enumerate(names, start=1)],
+    )
+
+
+def _run_scoped_discover(save_dir, config=None, names=("Gemma 4 chat templates",)):
+    parser = cli.build_parser()
+    args, _extra = parser.parse_known_args(
+        ["--discover", "AI agents", "--save-dir", str(save_dir), "--save-suffix", os.urandom(4).hex()]
+    )
+    with mock.patch.object(pipeline, "run_discover", return_value=_queue_report(list(names))):
+        return cli._run_discover(args, dict(config or {}))
+
+
+def test_discovery_run_records_surfacings_in_scoped_db_only(tmp_path, monkeypatch, capsys):
+    import store
+
+    monkeypatch.setattr(store, "DB_PATH", tmp_path / "global" / "research.db")
+    save_dir = tmp_path / "client"
+    save_dir.mkdir()
+
+    assert _run_scoped_discover(save_dir) == 0
+    first = capsys.readouterr().out
+    assert "**Pipeline:**" not in first  # nothing prior to annotate from
+
+    scoped_db = save_dir / "research.db"
+    assert scoped_db.is_file()
+    assert not (tmp_path / "global" / "research.db").exists()
+
+    import sqlite3
+    conn = sqlite3.connect(scoped_db)
+    rows = conn.execute(
+        "SELECT name, surface_count, status FROM discovery_topics"
+    ).fetchall()
+    conn.close()
+    assert rows == [("Gemma 4 chat templates", 1, "surfaced")]
+
+
+def test_second_discovery_run_annotates_from_prior_state_then_records(tmp_path, capsys):
+    save_dir = tmp_path / "client"
+    save_dir.mkdir()
+
+    assert _run_scoped_discover(save_dir) == 0
+    capsys.readouterr()
+    assert _run_scoped_discover(save_dir) == 0
+    second = capsys.readouterr().out
+
+    # Annotation reflects the state BEFORE this run's own surfacing was
+    # recorded: one prior surfacing means this appearance is the 2nd.
+    assert "**Pipeline:** surfaced 2nd time" in second
+
+    import sqlite3
+    conn = sqlite3.connect(save_dir / "research.db")
+    count = conn.execute(
+        "SELECT surface_count FROM discovery_topics WHERE name = ?",
+        ("Gemma 4 chat templates",),
+    ).fetchone()[0]
+    conn.close()
+    assert count == 2
+
+
+def test_covered_topic_resurfacing_renders_marked_covered(tmp_path, capsys):
+    import store
+
+    save_dir = tmp_path / "client"
+    save_dir.mkdir()
+
+    assert _run_scoped_discover(save_dir) == 0
+    with store.scoped_db(save_dir / "research.db"):
+        assert store.mark_discovery_covered(
+            "Gemma 4 chat templates", as_of="2026-07-20"
+        ) is not None
+    capsys.readouterr()
+
+    assert _run_scoped_discover(save_dir) == 0
+    rendered = capsys.readouterr().out
+    assert "marked covered" in rendered
+    assert "**Pipeline:** surfaced 2nd time, marked covered" in rendered
+
+
+def test_queue_opt_out_via_process_env_seam(tmp_path, monkeypatch, capsys):
+    from lib import env
+
+    monkeypatch.setenv("LAST30DAYS_DISCOVERY_QUEUE", "off")
+    monkeypatch.setattr(env, "CONFIG_FILE", tmp_path / "does-not-exist.env")
+    monkeypatch.chdir(tmp_path)
+    with mock.patch.object(env, "_load_keychain", return_value={}), \
+         mock.patch.object(env, "_load_pass", return_value={}):
+        config = env.get_config()
+    assert config["LAST30DAYS_DISCOVERY_QUEUE"] == "off"
+
+    save_dir = tmp_path / "client"
+    save_dir.mkdir()
+    assert _run_scoped_discover(save_dir, config=config) == 0
+    assert "**Pipeline:**" not in capsys.readouterr().out
+    assert not (save_dir / "research.db").exists()
+
+
+def test_queue_opt_out_via_env_file_seam(tmp_path, monkeypatch, capsys):
+    from lib import env
+
+    monkeypatch.delenv("LAST30DAYS_DISCOVERY_QUEUE", raising=False)
+    env_file = tmp_path / "config.env"
+    env_file.write_text("LAST30DAYS_DISCOVERY_QUEUE=off\n", encoding="utf-8")
+    monkeypatch.setattr(env, "CONFIG_FILE", env_file)
+    monkeypatch.chdir(tmp_path)
+    with mock.patch.object(env, "_load_keychain", return_value={}), \
+         mock.patch.object(env, "_load_pass", return_value={}):
+        config = env.get_config()
+    assert config["LAST30DAYS_DISCOVERY_QUEUE"] == "off"
+
+    save_dir = tmp_path / "client"
+    save_dir.mkdir()
+    assert _run_scoped_discover(save_dir, config=config) == 0
+    assert not (save_dir / "research.db").exists()
+
+
+def test_discovery_queue_failure_never_crashes_a_finished_run(tmp_path, monkeypatch, capsys):
+    """P0: a broken research.db (locked, read-only, corrupt) must not destroy
+    a finished multi-minute pipeline run - the brief still renders (exit 0)
+    with a stderr warning, and queue fields keep their defaults."""
+    import sqlite3
+
+    import store
+
+    def _locked(*_args, **_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(store, "record_discovery_surfacing", _locked)
+    save_dir = tmp_path / "client"
+    save_dir.mkdir()
+
+    assert _run_scoped_discover(save_dir) == 0
+    captured = capsys.readouterr()
+    assert "## 1. Gemma 4 chat templates" in captured.out
+    assert "**Pipeline:**" not in captured.out
+    assert "[last30days] Warning:" in captured.err
+    assert "database is locked" in captured.err
+
+
+def test_sibling_topics_in_same_run_do_not_cross_annotate(tmp_path, capsys):
+    """Annotations describe the queue state BEFORE this run: two same-anchor
+    siblings surfaced by ONE run must not fuzzy-match each other's rows and
+    render a false 'surfaced 2nd time' on first-ever topics."""
+    import sqlite3
+
+    save_dir = tmp_path / "client"
+    save_dir.mkdir()
+
+    assert _run_scoped_discover(
+        save_dir, names=("Gemma 4 chat templates", "Gemma 4 enterprise")
+    ) == 0
+    rendered = capsys.readouterr().out
+    assert "## 1. Gemma 4 chat templates" in rendered
+    assert "## 2. Gemma 4 enterprise" in rendered
+    assert "**Pipeline:**" not in rendered
+
+    conn = sqlite3.connect(save_dir / "research.db")
+    rows = conn.execute(
+        "SELECT name, surface_count FROM discovery_topics ORDER BY name"
+    ).fetchall()
+    conn.close()
+    assert rows == [("Gemma 4 chat templates", 1), ("Gemma 4 enterprise", 1)]
+
+
+def test_discovery_mock_run_writes_no_research_db(tmp_path):
+    """--mock stays 100% side-effect-free: no queue writes, no research.db."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "skills/last30days/scripts/last30days.py",
+            "--discover",
+            "AI agents",
+            "--mock",
+            "--save-dir",
+            str(tmp_path),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not (tmp_path / "research.db").exists()
+
+
+def test_queue_list_shows_uncovered_only_by_default(tmp_path, monkeypatch, capsys):
+    import store
+
+    save_dir = tmp_path / "client"
+    save_dir.mkdir()
+    with store.scoped_db(save_dir / "research.db"):
+        store.record_discovery_surfacing(
+            "Gemma 4 chat templates", domain="AI agents", run_ref="r1", as_of="2026-07-19",
+        )
+        store.record_discovery_surfacing(
+            "OpenAI Agent SDK", domain="AI agents", run_ref="r1", as_of="2026-07-20",
+        )
+        store.mark_discovery_covered("OpenAI Agent SDK", as_of="2026-07-20")
+
+    monkeypatch.setattr(cli.env, "get_config", lambda **_kwargs: {})
+    monkeypatch.setattr(
+        sys, "argv", ["last30days.py", "queue", "list", "--save-dir", str(save_dir)]
+    )
+    assert cli.main() == 0
+    out = capsys.readouterr().out
+    assert "Gemma 4 chat templates" in out
+    assert "OpenAI Agent SDK" not in out
+    for column in ("name", "domain", "surface_count", "last_surfaced", "status"):
+        assert column in out
+
+
+def test_queue_list_empty_db_reports_no_recorded_runs(tmp_path, monkeypatch, capsys):
+    """A db that exists but has zero discovery rows (e.g. created via --store
+    by a topic run) must not claim every topic is covered."""
+    import store
+
+    save_dir = tmp_path / "client"
+    save_dir.mkdir()
+    store.init_db(save_dir / "research.db")
+
+    monkeypatch.setattr(cli.env, "get_config", lambda **_kwargs: {})
+    monkeypatch.setattr(
+        sys, "argv", ["last30days.py", "queue", "list", "--save-dir", str(save_dir)]
+    )
+    assert cli.main() == 0
+    out = capsys.readouterr().out
+    assert "no discovery run has recorded topics yet" in out
+    assert "marked covered" not in out
+
+
+def test_queue_cover_marks_topic_covered(tmp_path, monkeypatch, capsys):
+    import sqlite3
+
+    import store
+
+    save_dir = tmp_path / "client"
+    save_dir.mkdir()
+    with store.scoped_db(save_dir / "research.db"):
+        store.record_discovery_surfacing(
+            "Gemma 4 chat templates", domain="AI agents", run_ref="r1", as_of="2026-07-19",
+        )
+
+    monkeypatch.setattr(cli.env, "get_config", lambda **_kwargs: {})
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["last30days.py", "queue", "cover", "Gemma 4 chat templates", "--save-dir", str(save_dir)],
+    )
+    assert cli.main() == 0
+
+    conn = sqlite3.connect(save_dir / "research.db")
+    status, covered_at = conn.execute(
+        "SELECT status, covered_at FROM discovery_topics WHERE name = ?",
+        ("Gemma 4 chat templates",),
+    ).fetchone()
+    conn.close()
+    assert status == "covered"
+    assert covered_at
+
+
+def test_queue_cover_unknown_name_exits_2_with_stderr(tmp_path, monkeypatch, capsys):
+    import store
+
+    save_dir = tmp_path / "client"
+    save_dir.mkdir()
+    with store.scoped_db(save_dir / "research.db"):
+        store.record_discovery_surfacing(
+            "Gemma 4 chat templates", domain="AI agents", run_ref="r1", as_of="2026-07-19",
+        )
+
+    monkeypatch.setattr(cli.env, "get_config", lambda **_kwargs: {})
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["last30days.py", "queue", "cover", "No Such Topic", "--save-dir", str(save_dir)],
+    )
+    assert cli.main() == 2
+    err = capsys.readouterr().err
+    assert "No Such Topic" in err
+
+
+def test_queue_cover_cli_unknown_name_subprocess_exit_code(tmp_path):
+    result = subprocess.run(
+        [
+            sys.executable,
+            "skills/last30days/scripts/last30days.py",
+            "queue",
+            "cover",
+            "No Such Topic",
+            "--save-dir",
+            str(tmp_path),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "No Such Topic" in result.stderr
 
 
 def test_discovery_exits_when_configured_sources_have_no_discovery_feed(monkeypatch, capsys):
