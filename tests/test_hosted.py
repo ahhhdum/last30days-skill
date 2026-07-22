@@ -13,6 +13,7 @@ import io
 import json
 import sys
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime
 from unittest import mock
 
 import pytest
@@ -168,6 +169,94 @@ def test_env_set_routes_to_remote_path(monkeypatch):
     }]
 
 
+def test_register_is_forwarded_to_remote_backend(monkeypatch):
+    monkeypatch.setenv("LAST30DAYS_API_KEY", TEST_KEY)
+    monkeypatch.setenv("LAST30DAYS_API_BASE", TEST_BASE)
+    calls = []
+
+    monkeypatch.setattr(
+        hosted,
+        "run_hosted",
+        lambda topic, depth, **kwargs: calls.append((topic, depth, kwargs)) or 0,
+    )
+    with mock.patch.object(cli.env, "get_config", return_value={}):
+        rc, _out, _err = run_main(
+            ["test", "topic", "--register=creator"]
+        )
+
+    assert rc == 0
+    assert calls == [
+        (
+            "test topic",
+            "default",
+            {
+                "emit": "compact",
+                "save_dir": None,
+                "save_suffix": "",
+                "register": "creator",
+            },
+        )
+    ]
+
+
+def test_hosted_submit_adds_only_nondefault_register(remote_env, monkeypatch):
+    payloads = []
+    monkeypatch.setattr(
+        hosted.http,
+        "post",
+        lambda _url, *, json_data, **_kwargs: payloads.append(json_data) or SUBMIT_OK,
+    )
+
+    hosted.submit("test topic", "quick")
+    hosted.submit("test topic", "quick", register="dev")
+
+    assert payloads == [
+        {"query": "test topic", "depth": "quick"},
+        {"query": "test topic", "depth": "quick", "register": "dev"},
+    ]
+
+
+def test_remote_json_requires_raw_profile(monkeypatch):
+    monkeypatch.setenv("LAST30DAYS_API_KEY", TEST_KEY)
+    monkeypatch.setenv("LAST30DAYS_API_BASE", TEST_BASE)
+    monkeypatch.setattr(
+        hosted,
+        "run_hosted",
+        lambda *args, **kwargs: pytest.fail("remote request should not start"),
+    )
+
+    with mock.patch.object(cli.env, "get_config", return_value={}):
+        rc, _out, err = run_main(["test", "topic", "--emit=json"])
+
+    assert rc == 2
+    assert "remote API backend only supports --json-profile=raw" in err
+
+
+def test_remote_raw_json_preserves_existing_server_contract(monkeypatch):
+    monkeypatch.setenv("LAST30DAYS_API_KEY", TEST_KEY)
+    monkeypatch.setenv("LAST30DAYS_API_BASE", TEST_BASE)
+    calls = []
+    monkeypatch.setattr(
+        hosted,
+        "run_hosted",
+        lambda topic, depth, **kwargs: calls.append((topic, depth, kwargs)) or 0,
+    )
+
+    with mock.patch.object(cli.env, "get_config", return_value={}):
+        rc, _out, _err = run_main(
+            ["test", "topic", "--emit=json", "--json-profile=raw"]
+        )
+
+    assert rc == 0
+    assert calls == [
+        (
+            "test topic",
+            "default",
+            {"emit": "json", "save_dir": None, "save_suffix": ""},
+        )
+    ]
+
+
 @pytest.mark.parametrize(
     ("flag", "expected_depth"),
     [(["--quick"], "quick"), ([], "default"), (["--deep"], "deep")],
@@ -317,6 +406,30 @@ def test_save_dir_writes_raw_markdown(remote_env, monkeypatch, capsys, tmp_path)
     assert saved.exists()
     assert "# Raw markdown" in saved.read_text(encoding="utf-8")
     assert "Saved output to" in captured.err
+    assert TEST_KEY not in captured.err
+
+
+def test_save_dir_uses_unique_dated_fallback(remote_env, monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(hosted.http, "post", lambda *a, **k: dict(SUBMIT_OK))
+    poll_rows = [dict(POLL_COMPLETE)]
+    monkeypatch.setattr(hosted.http, "get", lambda *a, **k: poll_rows.pop(0))
+    today = datetime.now().strftime("%Y-%m-%d")
+    base = tmp_path / "test-topic-raw.md"
+    dated = tmp_path / f"test-topic-raw-{today}.md"
+    base.write_text("base content", encoding="utf-8")
+    dated.write_text("dated content", encoding="utf-8")
+
+    rc = hosted.run_hosted("Test Topic!", "default", emit="compact",
+                           save_dir=str(tmp_path), save_suffix="")
+    captured = capsys.readouterr()
+
+    saved = tmp_path / f"test-topic-raw-{today}-1.md"
+    assert rc == 0
+    assert saved.exists()
+    assert "# Raw markdown" in saved.read_text(encoding="utf-8")
+    assert base.read_text(encoding="utf-8") == "base content"
+    assert dated.read_text(encoding="utf-8") == "dated content"
+    assert f"Saved output to {saved.resolve()}" in captured.err
     assert TEST_KEY not in captured.err
 
 

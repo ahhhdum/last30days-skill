@@ -1,3 +1,4 @@
+import contextlib
 import json
 import io
 import shutil
@@ -7,6 +8,7 @@ import sys
 import types
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -60,9 +62,11 @@ class CliV3Tests(unittest.TestCase):
         )
         self.assertEqual(0, result.returncode, result.stderr)
         payload = json.loads(result.stdout)
-        self.assertIn("query_plan", payload)
-        self.assertIn("ranked_candidates", payload)
+        self.assertEqual("1.2", payload["schema_version"])
+        self.assertEqual("test topic", payload["query"])
+        self.assertIn("results", payload)
         self.assertIn("clusters", payload)
+        self.assertIn("source_status", payload)
 
     def test_invalid_plan_json_exits_nonzero(self):
         """Malformed --plan JSON must fail fast, not silently fall back to the
@@ -169,6 +173,25 @@ class CliV3Tests(unittest.TestCase):
         self.assertEqual(["biosecurity"], args.topic)
         self.assertEqual([], extra)
 
+    def test_build_parser_accepts_result_cap_overrides(self):
+        parser = cli.build_parser()
+        args, extra = parser.parse_known_args(
+            ["--max-results", "200", "--max-per-source", "60",
+             "--max-source-fetches", "8", "figma config 2026"]
+        )
+        self.assertEqual(200, args.max_results)
+        self.assertEqual(60, args.max_per_source)
+        self.assertEqual(8, args.max_source_fetches)
+        self.assertEqual(["figma config 2026"], args.topic)
+        self.assertEqual([], extra)
+
+    def test_result_cap_overrides_default_to_none(self):
+        parser = cli.build_parser()
+        args, _ = parser.parse_known_args(["figma config 2026"])
+        self.assertIsNone(args.max_results)
+        self.assertIsNone(args.max_per_source)
+        self.assertIsNone(args.max_source_fetches)
+
     def test_research_unknown_flag_fails_before_config_load(self):
         with mock.patch.object(
             cli.env, "get_config", side_effect=AssertionError("config should not load")
@@ -269,7 +292,7 @@ class CliV3Tests(unittest.TestCase):
         brief = cli.emit_output(report, "brief")
 
         self.assertIn("# last30days v", compact)
-        self.assertIn('"topic": "OpenClaw vs NanoClaw"', json_output)
+        self.assertIn('"query": "OpenClaw vs NanoClaw"', json_output)
         self.assertIsInstance(context, str)
         self.assertIn("# Production Brief:", brief)
 
@@ -282,15 +305,34 @@ class CliV3Tests(unittest.TestCase):
             path = cli.save_output(report, "json", tmp)
             self.assertEqual(".json", path.suffix)
             payload = json.loads(path.read_text())
-            self.assertEqual("OpenClaw vs NanoClaw", payload["topic"])
+            self.assertEqual("OpenClaw vs NanoClaw", payload["query"])
+
+    def test_save_output_uses_unique_dated_fallback(self):
+        report = self.make_report()
+        with tempfile.TemporaryDirectory() as tmp:
+            save_dir = Path(tmp)
+            today = datetime.now().strftime("%Y-%m-%d")
+            base = save_dir / "openclaw-vs-nanoclaw-raw.md"
+            dated = save_dir / f"openclaw-vs-nanoclaw-raw-{today}.md"
+            base.write_text("base content", encoding="utf-8")
+            dated.write_text("dated content", encoding="utf-8")
+
+            saved = cli.save_output(report, "md", tmp)
+
+            self.assertEqual((save_dir / f"openclaw-vs-nanoclaw-raw-{today}-1.md").resolve(), saved)
+            self.assertEqual("base content", base.read_text(encoding="utf-8"))
+            self.assertEqual("dated content", dated.read_text(encoding="utf-8"))
+            self.assertTrue(saved.exists())
 
     def test_save_output_writes_utf8_encoded_markdown(self):
         report = self.make_report()
         with tempfile.TemporaryDirectory() as tmp:
-            with mock.patch("pathlib.Path.write_text", autospec=True, return_value=1) as write_text:
-                cli.save_output(report, "md", tmp)
-        _, kwargs = write_text.call_args
-        self.assertEqual("utf-8", kwargs.get("encoding"))
+            path = cli.save_output(report, "md", tmp)
+            raw = path.read_bytes()
+            content = path.read_text(encoding="utf-8")
+        self.assertIn(report.topic, content)
+        # Verify the raw bytes decode cleanly as UTF-8.
+        self.assertEqual(content, raw.decode("utf-8"))
 
     def test_save_rendered_output_writes_exact_file_path(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -339,6 +381,7 @@ class CliV3Tests(unittest.TestCase):
         report = self.make_report()
 
         success_store = types.SimpleNamespace(
+            scoped_db=lambda _path: contextlib.nullcontext(),
             init_db=mock.Mock(),
             add_topic=mock.Mock(return_value={"id": 7}),
             record_run=mock.Mock(return_value=11),
@@ -357,6 +400,7 @@ class CliV3Tests(unittest.TestCase):
         )
 
         failure_store = types.SimpleNamespace(
+            scoped_db=lambda _path: contextlib.nullcontext(),
             init_db=mock.Mock(),
             add_topic=mock.Mock(return_value={"id": 7}),
             record_run=mock.Mock(return_value=12),

@@ -7,6 +7,133 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.18.0] - 2026-07-21
+
+### Changed
+
+- Discovery is now a three-command host-judged protocol (SKILL.md LAW 11: "YOU ARE THE JUDGE"): `--discover --nominate-only` writes a nominations bundle and a fenced judging digest, the hosting model writes a judgments file (short names, junk flags, worthiness) and later an angles file, and `--discover --judgments <file>` / `--discover --finalize [--angles <file>]` complete the run. No API key is ever needed for host-judged trending. ([#856](https://github.com/mvanhorn/last30days-skill/pull/856))
+- Discovery protocol runs enrich at the normal-research tier (default depth, 4 workers, `LAST30DAYS_ENRICH_BUDGET_SECONDS` default 450s) instead of the 240s quick sweep; one-shot `--discover` keeps the quick tier unchanged. ([#856](https://github.com/mvanhorn/last30days-skill/pull/856))
+- Displayed discovery ranks now descend by the card's velocity score, and survivors sharing evidence (same top comment or 2+ shared URLs) fold into the higher-velocity story. ([#856](https://github.com/mvanhorn/last30days-skill/pull/856))
+
+### Removed
+
+- The engine-side discovery LLM judge (`lib/discovery_judge.py` and all reasoning-provider resolution in the discovery path). One-shot cron runs use deterministic heuristic names, velocity-only order, and no angles, with one loud stderr note pointing at the host-judged protocol. Keyed one-shot users lose provider naming/angles by design - the protocol replaces them. ([#856](https://github.com/mvanhorn/last30days-skill/pull/856))
+
+## [3.17.0] - 2026-07-21
+
+### Added
+
+- Discovery trend cards now lead with short judged topic names: a stage-1 LLM judge gives each nominated cluster a 2-6 word searchable name (with a deterministic fallback namer), replacing raw post titles as card headings, and blends a 0-100 content-worthiness score into the ranking. ([#852](https://github.com/mvanhorn/last30days-skill/pull/852))
+- Junk-shape gate in discovery: help-me / beginner / personal-musing post shapes flagged by the judge (or the deterministic classifier at the seed-source floor) lose the single-source ranking bypass and need cross-source corroboration to rank. ([#852](https://github.com/mvanhorn/last30days-skill/pull/852))
+- Stage-2 angle pass: every discovery trend card carries engine-owned `**Podcast angle:**` and `**X article angle:**` lines, so the brief doubles as a content-pipeline worksheet. ([#852](https://github.com/mvanhorn/last30days-skill/pull/852))
+- Persistent discovery topic queue: `--discover` runs record surfaced topics in research.db (on by default; `LAST30DAYS_DISCOVERY_QUEUE=off` opts out, `--mock` never writes, `--save-dir` scopes the store), re-surfaced or covered topics get a `**Pipeline:**` annotation on their card, and `queue list` / `queue cover "<name>"` manage the queue from the CLI. ([#852](https://github.com/mvanhorn/last30days-skill/pull/852))
+- Discovery JSON export schema 1.1: per-topic `podcast_angle` / `x_article_angle` plus the queue fields `previously_surfaced_count`, `last_surfaced`, and `covered` join the discovery export contract; every existing key is preserved. ([#852](https://github.com/mvanhorn/last30days-skill/pull/852))
+
+## [3.16.0] - 2026-07-15
+
+### Added
+
+- YouTube comments now fetch free via yt-dlp first; ScrapeCreators is a failure-only fallback, dropping the paid-key requirement for comment enrichment. ([#827](https://github.com/mvanhorn/last30days-skill/pull/827))
+- `GITHUB_TOKEN` is registered end-to-end (.env, keychain, setup scripts, doctor) so the GitHub source stops rate-limiting keyed users. ([#793](https://github.com/mvanhorn/last30days-skill/pull/793))
+- Opt-in overridable per-source result caps for high-volume topics; defaults unchanged when unset. ([#717](https://github.com/mvanhorn/last30days-skill/pull/717))
+- `OPENROUTER_BASE_URL` override, mirroring the existing OPENAI/XAI base-URL knobs. ([#703](https://github.com/mvanhorn/last30days-skill/pull/703))
+- `LAST30DAYS_MCP_TIMEOUT` accepts bare integer seconds as documented, not just Go duration strings. ([#765](https://github.com/mvanhorn/last30days-skill/pull/765))
+
+### Fixed
+
+- Keyless web search now works on hosts where DuckDuckGo anomaly-blocks the egress IP (a 202 challenge page with no results — common on datacenter/VPS IPs). Added Startpage as a second keyless rung (DuckDuckGo → Startpage → configured SearXNG), so the web floor still returns results there. Also hardened `_strip_html` to drop `<style>`/`<script>` contents so inline CSS can't leak into a title or snippet.
+- Web/grounding results are no longer discarded when one of them is a reddit.com URL whose enrichment fetch fails. Reddit enrichment is a best-effort secondary fetch; its HTTP failures (e.g. a 403 on a datacenter IP) were being attributed to the whole web source, which then reported "0 items — HTTP 403" despite having retrieved good results. Its failures are now isolated from the source's outcome.
+- Very long topic names no longer crash `save_output` (ENAMETOOLONG): slugify truncates at 180 chars with a stable hash suffix so distinct topics stay distinct. ([#786](https://github.com/mvanhorn/last30days-skill/pull/786))
+- Quick depth honors the plan's explicit sources instead of trimming them away. ([#664](https://github.com/mvanhorn/last30days-skill/pull/664))
+- X search on Windows/Node 24: valid Bird CLI JSON on stdout is trusted even when the process exits non-zero. ([#813](https://github.com/mvanhorn/last30days-skill/pull/813))
+- 17 `.get(key, 0)` sites are now None-safe, fixing sort/math crashes on stored data with null fields. ([#822](https://github.com/mvanhorn/last30days-skill/pull/822))
+- Non-ASCII characters in URLs are percent-encoded component-wise before urllib, fixing the latin-1 encode crash. ([#822](https://github.com/mvanhorn/last30days-skill/pull/822), supersedes [#821](https://github.com/mvanhorn/last30days-skill/pull/821))
+- `LAST30DAYS_DEBUG` is registered and resolved lazily; fixes the `http.DEBUG` AttributeError in xai_x. ([#770](https://github.com/mvanhorn/last30days-skill/pull/770))
+- `DEGRADED_TRANSCRIPT_THRESHOLD` set in .env is picked up. ([#807](https://github.com/mvanhorn/last30days-skill/pull/807))
+- One bad video no longer marks the whole ScrapeCreators transcript source failed. ([#830](https://github.com/mvanhorn/last30days-skill/pull/830))
+- Chromium cookie temp copies keep 0600 permissions for their whole lifetime. ([#764](https://github.com/mvanhorn/last30days-skill/pull/764))
+- Thin-source retries forward pinned subreddits/hashtags/creators instead of retrying generically. ([#795](https://github.com/mvanhorn/last30days-skill/pull/795))
+
+## [3.15.0] - 2026-07-14
+
+### Added
+
+- `doctor` is now a four-state audit instead of a flat config prediction: every source is grouped into **WORKING** (verified this run, last run, or keyless-always-on), **TURNED ON - UNVERIFIED** (configured/opted-in but no run evidence), **NOT WORKING** (configured but failing, or the last run errored), or **COULD BE ON** (an available capability not yet configured). Each source renders on its own labeled line, so GitHub (and every other source) is no longer buried in a cluster.
+- `doctor --postmortem`: reads the last run's `last-report.json` (any age, labeled) and reports, per source, what actually happened - Failed / Partial / Succeeded / Skipped with details and fix hints - so "what broke on that run?" is answerable after the fact.
+- `doctor --probe`: a bounded live test that verifies WORKING instead of guessing. It also auto-fires when there is no fresh run. Each source is probed concurrently under a per-source deadline (`LAST30DAYS_DOCTOR_PROBE_TIMEOUT`, default 10s) so a slow source can never hang the command. Scope is free HTTP endpoints + keyless CLIs only; credit-gated sources (X, TikTok, Instagram, Threads, …) are never live-probed and stay UNVERIFIED.
+- `doctor` now surfaces **CLI health**: sources needing a downloaded binary (`yt-dlp`, `digg-pp-cli`, `techmeme-pp-cli`, `arxiv-pp-cli`, `trustpilot-pp-cli`, optional `gh`) carry an inline `[CLI: name ✓]` marker and a dedicated CLI-health block, visibly distinct from keyless sources.
+- `doctor` now audits **techmeme, arXiv, and trustpilot** (they run in research but were previously absent from the health surface), and surfaces **backup lanes** (Reddit ScrapeCreators backfill, YouTube SC transcript/search backstop used when yt-dlp is rate-limited, X cookie-vs-`XAI_API_KEY` dual path) and **comment lanes** (youtube/tiktok/instagram) as indented sub-lines.
+- `doctor --json` gains `audit_state`, `cli`, `backups`, `comments`, and `run_outcome` per source plus a top-level `mode`, all additive - every existing key is preserved.
+
+### Fixed
+
+- `doctor` no longer reports Threads as Ready when it will not run: SC-gated opt-in sources now honor `INCLUDE_SOURCES` (mirrors the correct LinkedIn gating), so Threads shows COULD BE ON until opted in. TikTok/Instagram stay on-by-default.
+
+## [3.14.0] - 2026-07-12
+
+### Added
+
+- Global trending: bare `--discover` (no domain) sweeps every river feed's own hot list (r/all, Hacker News front page, Digg) with no keyword gate - `/last30days trending` now works. ([#816](https://github.com/mvanhorn/last30days-skill/pull/816))
+- Discovery is now two-stage: a listing sweep nominates candidate topics, then each nomination gets a full research pass (Reddit with comments, X, YouTube, Techmeme, arXiv, HN, Polymarket, web) before ranking - Techmeme and arXiv reach discovery for the first time, and every trend card can carry a verbatim community-voice quote with attribution plus a cross-source corroboration badge. `--discover-shallow` skips the research passes for a faster, thinner sweep. ([#816](https://github.com/mvanhorn/last30days-skill/pull/816))
+- Discovery confidence floor: every topic must clear cross-source confirmation or a genuinely strong single-source spike; when nothing clears, the run reports an honest "Nothing solid this window" (JSON `outcome: nothing-solid` with the closest `weak_signal` named) instead of ranking noise. The discovery JSON contract gains `outcome`, `weak_signal`, and per-topic `top_comment` / `corroboration_count`. ([#816](https://github.com/mvanhorn/last30days-skill/pull/816))
+
+### Fixed
+
+- Discovery no longer emits ranked junk on quiet or over-broad domains (the "sports" sweep that returned five 1-like tweets): sub-floor evidence never ranks. ([#816](https://github.com/mvanhorn/last30days-skill/pull/816))
+- An explicit `--search` source boundary now holds through discovery's research passes, not just the listing sweep; `--discover-shallow` without `--discover` errors instead of silently running a full research pass; enrichment stragglers can no longer keep the process alive past the wall-clock budget. ([#816](https://github.com/mvanhorn/last30days-skill/pull/816))
+
+## [3.13.1] - 2026-07-12
+
+### Added
+
+- Doctor `library` line: reports how many saved research briefs the local library holds (cheap glob, never a full parse), so the report's "From your library" block is explained on the health surface. The block itself now carries a one-line explainer with the `LAST30DAYS_LIBRARY_CONTEXT=off` opt-out. ([#815](https://github.com/mvanhorn/last30days-skill/pull/815))
+
+### Fixed
+
+- Doctor no longer reports X as `Off` when the bird CLI plus browser-cookie consent serve X fine at runtime: the cookie-backed path now reads **Ready**, with an honest note that the session is verified only at run time and `XAI_API_KEY` is the key-backed alternative. ([#815](https://github.com/mvanhorn/last30days-skill/pull/815))
+- Doctor's YouTube note no longer reads as broken when yt-dlp is healthy: it affirms search + transcripts work, scopes the transcription key to caption-free videos, and correctly attributes comment text to ScrapeCreators (key + `youtube_comments` opt-in) with an actionable fix line - never to yt-dlp. ([#815](https://github.com/mvanhorn/last30days-skill/pull/815))
+- Doctor's Web line on Claude Code now says host-native web search is active instead of `degraded ... keyless`, and names the host rather than an env var the user never set. Messaging only; engine web behavior unchanged. ([#815](https://github.com/mvanhorn/last30days-skill/pull/815))
+- The report footer no longer prints `no results` lines for zero-item sources; failure signal stays in the Source Coverage / Partial Coverage evidence blocks, and the `Raw results saved to` line still renders when every source is empty. ([#815](https://github.com/mvanhorn/last30days-skill/pull/815))
+
+## [3.13.0] - 2026-07-12
+
+### Added
+
+- Xiaohongshu (RED) documented as a first-class requested-only source, with auto-detection of a logged-in local browser-session service: last30days probes `http://localhost:18060` then `http://host.docker.internal:18060` when the source is opted in; `XIAOHONGSHU_API_BASE` remains the explicit override. Zero probing and zero behavior change for users who have not opted in. ([#766](https://github.com/mvanhorn/last30days-skill/pull/766), thanks @yuzhiyang1)
+- DripStack as an opt-in source: premium financial newsletter and analyst-writeup search (free public API, no key), complementing StockTwits retail sentiment and Polymarket odds with professional analyst signal. Ships default-off; requests route through the shared HTTP layer and honor the 30-day window. ([#791](https://github.com/mvanhorn/last30days-skill/pull/791), thanks @zimoo354)
+- Persistent opt-in for both new sources via `INCLUDE_SOURCES=xiaohongshu` / `INCLUDE_SOURCES=dripstack` in `.env`, matching the LinkedIn/Perplexity pattern; per-run `--search` still works. ([#812](https://github.com/mvanhorn/last30days-skill/pull/812))
+
+### Fixed
+
+- Whitespace in comma-separated `INCLUDE_SOURCES` values no longer silently breaks any source's persisted opt-in. ([#812](https://github.com/mvanhorn/last30days-skill/pull/812))
+- DripStack article bodies (subtitle/lede) now reach ranking and synthesis instead of only the capped snippet; the Xiaohongshu doctor prescription no longer recommends an env pin that disables auto-probing. ([#811](https://github.com/mvanhorn/last30days-skill/pull/811))
+- Release hygiene: SKILL.md body header and uv.lock are regenerated with the version bump (both were missed in the 3.12.0 cut and hotfixed on main).
+
+## [3.12.0] - 2026-07-12
+
+### Added
+
+- Typed per-run source outcomes: every run records what actually happened per source (`ok`, `no-results`, `partial`, `rate-limited`, `auth-failed`, `unreachable`, `timeout`, `schema-drift`, `skipped-unconfigured`, `error`) in `source_status`, with doctor-aligned states and fix hints - silence is never mistaken for coverage. ([#797](https://github.com/mvanhorn/last30days-skill/pull/797))
+- Versioned agent JSON export profile: `--emit=json --json-profile=agent` returns a stable machine contract (`schema_version` 1.2) with `source_status`, clusters, ranked results with joinable `candidate_id`, and freshness verdicts; `--json-profile=raw` keeps the legacy dump byte-identical. ([#798](https://github.com/mvanhorn/last30days-skill/pull/798), [#810](https://github.com/mvanhorn/last30days-skill/pull/810))
+- Research-quality eval harness: recorded-fixture regression suite scoring runs on citation grounding, recency compliance, cluster coherence, coverage, and determinism against per-fixture floors, in CI. ([#799](https://github.com/mvanhorn/last30days-skill/pull/799))
+- `--drill`: re-research one cluster of the cached report in depth without a full re-run. ([#800](https://github.com/mvanhorn/last30days-skill/pull/800))
+- `--discover`: topic-less trending sweeps over listing feeds with velocity-ranked story clusters and ready-to-run research commands. ([#801](https://github.com/mvanhorn/last30days-skill/pull/801))
+- `library feed`: renders every saved brief into a browsable HTML library with a topic-grouped index and a subscribable Atom feed; hand-written pages are preserved with backups. ([#802](https://github.com/mvanhorn/last30days-skill/pull/802))
+- `library search`: SQLite FTS5 full-text search across saved briefs and store sightings, plus a passive "From your library" section when new runs overlap past research; scoped `--save-dir` libraries stay fully isolated from the shared store. ([#803](https://github.com/mvanhorn/last30days-skill/pull/803))
+- `--register` audience templates: `exec`, `dev`, and `creator` presets reshape section order and budgets for the reader; `eli5` is unified into the same mechanism. ([#804](https://github.com/mvanhorn/last30days-skill/pull/804))
+- `--verify-freshness`: typed per-claim act-time verdicts (`current` / `stale` / `contradicted` / `unsupported`) with point re-fetch of Polymarket lines, GitHub stars, and StockTwits sentiment, inline or post-hoc over the cached report; closes the recency-promise audit gap. ([#805](https://github.com/mvanhorn/last30days-skill/pull/805), closes [#769](https://github.com/mvanhorn/last30days-skill/issues/769))
+- `--corpus`: register local directories as a private, offline, deterministic source; matching notes rank alongside social evidence under a LOCAL ONLY badge and are excluded from hosted publishing and agent JSON by default. ([#808](https://github.com/mvanhorn/last30days-skill/pull/808))
+- Native Grok Build (xAI) plugin and marketplace lane: `.grok-plugin/plugin.json` + `.grok-plugin/marketplace.json` so `grok plugin install mvanhorn/last30days-skill` and `grok plugin marketplace add mvanhorn/last30days-skill` work as first-class install paths. The self-hosted catalog uses a bare Git URL source (tracks HEAD); submitting to the official `xai-org/plugin-marketplace` remains a post-merge SHA-pinned outbound PR documented in `AGENTS.md`.
+
+### Fixed
+
+- Session-start hook no longer deadlocks under Homebrew bash 5.3: removed every heredoc from `check-config.sh` (bash 5.3 can block forever in `heredoc_write` inside command substitution). ([#809](https://github.com/mvanhorn/last30days-skill/pull/809))
+- Trustpilot transient-error retries keep their domain parameters. ([#794](https://github.com/mvanhorn/last30days-skill/pull/794))
+- Hosted same-day saves no longer overwrite earlier reports, and `save_output` never silently overwrites date-stamped files. ([#784](https://github.com/mvanhorn/last30days-skill/pull/784), [#785](https://github.com/mvanhorn/last30days-skill/pull/785))
+- `.env` reads as UTF-8 (with BOM tolerance and locale fallback) on Windows. ([#780](https://github.com/mvanhorn/last30days-skill/pull/780), [#715](https://github.com/mvanhorn/last30days-skill/pull/715))
+- `FUN_LEVEL` and `LAST30DAYS_REPORT_CACHE_TTL_SECONDS` are registered in `env.py` so `.env` values are no longer silently ignored; doctor detects `GITHUB_TOKEN` from the process environment. ([#708](https://github.com/mvanhorn/last30days-skill/pull/708), [#732](https://github.com/mvanhorn/last30days-skill/pull/732), [#782](https://github.com/mvanhorn/last30days-skill/pull/782))
+- File descriptors close promptly across the engine (`open()` wrapped in `with`). ([#775](https://github.com/mvanhorn/last30days-skill/pull/775))
+
 ## [3.11.0] - 2026-07-05
 
 ### Added
