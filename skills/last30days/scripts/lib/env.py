@@ -564,6 +564,8 @@ def get_config(policy: ConfigLoadPolicy | None = None) -> dict[str, Any]:
         # resolved above via openai_auth).
         ('GROQ_API_KEY', None),
         ('LAST30DAYS_YT_SUB_LANGS', 'en,es,pt'),
+        ('LAST30DAYS_YT_TRANSCRIPT_FAST_TIMEOUT', None),
+        ('LAST30DAYS_YT_SEARCH_TIMEOUT', None),
         ('GITHUB_TOKEN', None),
     ]
 
@@ -575,6 +577,16 @@ def get_config(policy: ConfigLoadPolicy | None = None) -> dict[str, Any]:
     # never overwritten by the (lower-priority) .env value.
     if config.get('LAST30DAYS_DEBUG'):
         os.environ.setdefault('LAST30DAYS_DEBUG', config['LAST30DAYS_DEBUG'])
+
+    # youtube_yt reads these tuning knobs lazily from os.environ, so values
+    # loaded from .env must be exported into the current engine process.
+    for key in (
+        'LAST30DAYS_YT_SUB_LANGS',
+        'LAST30DAYS_YT_TRANSCRIPT_FAST_TIMEOUT',
+        'LAST30DAYS_YT_SEARCH_TIMEOUT',
+    ):
+        if config.get(key):
+            os.environ.setdefault(key, config[key])
 
     # Backward-compat: ScrapeCreators' own examples and tutorials use the
     # SCRAPE_CREATORS_API_KEY spelling (with underscore between SCRAPE and

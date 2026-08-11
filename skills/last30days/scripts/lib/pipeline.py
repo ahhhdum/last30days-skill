@@ -888,6 +888,7 @@ def enrich_nominations(
     # real - stragglers cannot delay process exit. Abandonment is safe because
     # internal_subrun passes write nothing to disk (no save, no library sync,
     # no store), and every fetch layer inside run() carries its own timeout.
+    youtube_yt.reset_search_cache()
     enriched: dict[str, EnrichedTopic] = {}
     results_queue: queue.Queue[tuple[Nomination, schema.Report | None, Exception | None]] = queue.Queue()
     slots = threading.Semaphore(max(1, max_workers))
@@ -1910,6 +1911,11 @@ def run(
     corpus_dirs: list[str] | None = None,
     corpus_all_time: bool = False,
 ) -> schema.Report:
+    # Standalone runs (not competitor/discover sub-runs) own the YouTube
+    # search-cache lifecycle. Comparison fan-out clears once before submit so
+    # parallel entity sub-runs can still share in-run hits.
+    if not internal_subrun:
+        youtube_yt.reset_search_cache()
     settings = _resolve_depth_settings(depth, config)
     requested_sources = normalize_requested_sources(requested_sources)
     from_date, to_date = dates.get_date_range(lookback_days, as_of_date=as_of_date)
@@ -1956,7 +1962,10 @@ def run(
         available = [s for s in available if s != "grounding"]
     elif web_backend in ("brave", "exa", "serper", "parallel", "keyless") and "grounding" not in available:
         available.append("grounding")
-    if (hiring_signals_mode or _company_topic_likely(topic)) and "jobs" not in available:
+    if (
+        hiring_signals_mode
+        or (not requested_sources and _company_topic_likely(topic))
+    ) and "jobs" not in available:
         available.append("jobs")
     if hiring_signals_mode:
         config = dict(config)
@@ -1970,9 +1979,10 @@ def run(
     if hiring_signals_mode and not planner_requested_sources:
         planner_requested_sources = ["jobs"]
 
-    if external_plan:
+    if external_plan is not None:
         # External plan provided (e.g., from Claude Code via --plan flag).
-        # Parse it through the same sanitizer to validate structure.
+        # Explicit input is a contract: validate it before permissive sanitization.
+        planner.validate_external_plan(external_plan)
         plan = planner._sanitize_plan(
             external_plan, topic, available, planner_requested_sources, depth,
         )
@@ -2099,6 +2109,7 @@ def run(
     _github_person_done = False
     if github_user and "github" in available and not _github_custom_done:
         bundle.mark_attempted("github")
+        _github_person_done = True
         try:
             person_items = github.search_github_person(
                 github_user, from_date, to_date,
@@ -2113,7 +2124,15 @@ def run(
                 # Use the first subquery's label so RRF can look up the weight
                 primary_label = plan.subqueries[0].label if plan.subqueries else "primary"
                 bundle.add_items(primary_label, "github", normalized)
-                _github_person_done = True
+            else:
+                # A pinned --github-user that yields nothing must not be
+                # silently backfilled by generic keyword search: the report
+                # would then present unrelated repos as this person's work.
+                bundle.record_failure(
+                    "github",
+                    "no-results",
+                    f"Person mode found no activity for @{github_user} in the window",
+                )
         except Exception as exc:
             bundle.errors_by_source["github"] = f"Person-mode failed: {exc}"
             state, attempted = _classify_source_failure(exc)
@@ -2410,6 +2429,10 @@ def run(
         shortlist_size=settings["rerank_limit"],
         resolved_handles=resolved_handles,
     )
+    ranked_public = rerank.prune_fallback_entity_misses(ranked_public, topic=topic)
+    # Private corpus already cleared a body-aware retrieval floor; do not apply
+    # the public title/snippet visibility gate (filenames often omit the head
+    # token even when the document body matched).
     ranked_candidates = sorted(
         [*ranked_public, *ranked_private],
         key=lambda candidate: (

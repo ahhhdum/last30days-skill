@@ -1,5 +1,7 @@
 # /last30days
 
+English | [Français](README.fr.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Português (Brasil)](README.pt-BR.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md)
+
 <p align="center">
   <img src="media/pr-assets/last30days-ad.gif" width="720" alt="last30days - an AI agent-led search engine that searches people, not editors" />
 </p>
@@ -363,7 +365,7 @@ MIT license. No tracking. No analytics. Your research stays on your machine. 2,7
 
 Built with Python 3.12+, yt-dlp, Node.js (vendored Bird client for X search), and ScrapeCreators API. v3 engine architecture by [@j-sperling](https://github.com/j-sperling).
 
-See [CONTRIBUTORS.md](CONTRIBUTORS.md) for the full list of community contributors and [CHANGELOG.md](CHANGELOG.md) for version history.
+See [CONTRIBUTING.md](CONTRIBUTING.md) to open a PR, [CONTRIBUTORS.md](CONTRIBUTORS.md) for the full list of community contributors, and [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## Star History
 

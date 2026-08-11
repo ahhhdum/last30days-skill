@@ -2,8 +2,9 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from lib import pipeline
+from lib import health
 from lib import http
+from lib import pipeline
 from lib import schema
 
 
@@ -53,6 +54,16 @@ class PipelineV3Tests(unittest.TestCase):
         # Grounding items now enter the ranked pool (web search backends produce real items)
         self.assertIn("grounding", report.items_by_source)
         self.assertEqual("gemini", report.provider_runtime.reasoning_provider)
+
+    def test_empty_explicit_plan_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "intent"):
+            pipeline.run(
+                topic="test topic",
+                config={"LAST30DAYS_REASONING_PROVIDER": "gemini"},
+                depth="quick",
+                external_plan={},
+                mock=True,
+            )
 
     def test_planner_trace_always_fires_on_mock_run(self):
         """Unit 5: The unified planner trace emits one summary line plus one
@@ -131,6 +142,30 @@ class PipelineV3Tests(unittest.TestCase):
         )
         self.assertEqual(["jobs"], sorted(report.items_by_source))
         self.assertTrue(report.artifacts["hiring_signals"]["include"])
+
+    def test_explicit_sources_suppress_automatic_company_jobs(self):
+        report = pipeline.run(
+            topic="Listen Labs",
+            config={"LAST30DAYS_REASONING_PROVIDER": "gemini"},
+            depth="quick",
+            requested_sources=["grounding", "x"],
+            mock=True,
+        )
+        self.assertEqual({"grounding", "x"}, set(report.items_by_source))
+        self.assertTrue(
+            all("jobs" not in subquery.sources for subquery in report.query_plan.subqueries)
+        )
+
+    def test_hiring_signals_forces_jobs_with_explicit_non_jobs_sources(self):
+        report = pipeline.run(
+            topic="Listen Labs",
+            config={"LAST30DAYS_REASONING_PROVIDER": "gemini"},
+            depth="quick",
+            requested_sources=["grounding", "x"],
+            mock=True,
+            hiring_signals_mode=True,
+        )
+        self.assertEqual({"grounding", "jobs", "x"}, set(report.items_by_source))
 
     def test_standard_company_run_fetches_jobs_for_signal_gate(self):
         report = pipeline.run(
@@ -412,6 +447,91 @@ class TestThinSourceRetryPlannedSource(unittest.TestCase):
         self.assertEqual(["x"], [call.kwargs["source"] for call in mock_retrieve.call_args_list])
         self.assertIn("x", bundle.items_by_source)
         self.assertEqual("https://x.com/example/status/100", bundle.items_by_source["x"][0].url)
+
+
+class TestPinnedGithubPersonAuthority(unittest.TestCase):
+    @patch("lib.pipeline._retrieve_stream")
+    @patch("lib.pipeline.github.search_github_person", return_value=[])
+    def test_empty_person_result_suppresses_generic_fanout_and_retry(
+        self, mock_person_search, mock_retrieve
+    ):
+        plan = {
+            "intent": "person",
+            "freshness_mode": "balanced_recent",
+            "cluster_mode": "topic",
+            "subqueries": [
+                {
+                    "label": "primary",
+                    "search_query": "octocat recent activity",
+                    "ranking_query": "What has @octocat done on GitHub recently?",
+                    "sources": ["github"],
+                }
+            ],
+            "source_weights": {"github": 1.0},
+        }
+
+        report = pipeline.run(
+            topic="octocat",
+            config={"LAST30DAYS_REASONING_PROVIDER": "gemini"},
+            depth="default",
+            requested_sources=["github"],
+            mock=True,
+            external_plan=plan,
+            github_user="octocat",
+        )
+
+        mock_person_search.assert_called_once()
+        mock_retrieve.assert_not_called()
+        self.assertEqual(schema.NO_RESULTS, report.source_status["github"].state)
+        self.assertIn(
+            "Person mode found no activity for @octocat",
+            report.source_status["github"].detail,
+        )
+
+    @patch("lib.pipeline._retrieve_stream")
+    @patch(
+        "lib.pipeline.github.search_github_person",
+        side_effect=RuntimeError("GitHub API unavailable"),
+    )
+    def test_person_failure_suppresses_generic_fanout_and_retry(
+        self, mock_person_search, mock_retrieve
+    ):
+        plan = {
+            "intent": "person",
+            "freshness_mode": "balanced_recent",
+            "cluster_mode": "topic",
+            "subqueries": [
+                {
+                    "label": "primary",
+                    "search_query": "octocat recent activity",
+                    "ranking_query": "What has @octocat done on GitHub recently?",
+                    "sources": ["github"],
+                }
+            ],
+            "source_weights": {"github": 1.0},
+        }
+
+        report = pipeline.run(
+            topic="octocat",
+            config={"LAST30DAYS_REASONING_PROVIDER": "gemini"},
+            depth="default",
+            requested_sources=["github"],
+            mock=True,
+            external_plan=plan,
+            github_user="octocat",
+        )
+
+        mock_person_search.assert_called_once()
+        mock_retrieve.assert_not_called()
+        self.assertEqual(health.ERROR, report.source_status["github"].state)
+        self.assertEqual(
+            "GitHub API unavailable",
+            report.source_status["github"].detail,
+        )
+        self.assertEqual(
+            "Person-mode failed: GitHub API unavailable",
+            report.errors_by_source["github"],
+        )
 
 
 
