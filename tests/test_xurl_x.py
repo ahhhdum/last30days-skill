@@ -41,7 +41,11 @@ class TestIsAvailable(unittest.TestCase):
         with mock.patch("subprocess.run", return_value=completed) as run_mock:
             self.assertTrue(xurl_x.is_available())
         call_args = run_mock.call_args[0][0]
-        self.assertEqual(call_args[:3], ["xurl", "auth", "status"])
+        # argv[0] is _xurl_bin(), which resolves through shutil.which — on
+        # Windows that is the full path to the npm-installed xurl.CMD shim,
+        # not the bare name. Assert on the basename so this holds on both.
+        self.assertRegex(call_args[0], r"(?i)(^|[\\/])xurl(\.cmd|\.exe)?$")
+        self.assertEqual(call_args[1:3], ["auth", "status"])
 
     def test_returns_false_when_oauth1_only(self):
         # OAuth1 alone cannot satisfy search_x's --auth app requirement.
