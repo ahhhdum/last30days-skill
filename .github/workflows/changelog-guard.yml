@@ -126,21 +126,17 @@ jobs:
             base_v="$(version_at "${BASE_SHA}" "${path}")"
             head_v="$(version_at "${HEAD_SHA}" "${path}")"
             if [ -n "${base_v}" ] && [ -n "${head_v}" ] && [ "${base_v}" != "${head_v}" ]; then
-              # A maintained fork restamps a local-version segment (3.18.4 ->
-              # 3.18.4+adam.1, or a malformed 3.18.4-adam.1 corrected to
-              # 3.18.4+adam.1) without cutting a release. Compare only the
-              # leading release segment: a change there is a real bump, a change
-              # confined to the local/pre suffix is not. Cross-manifest
-              # agreement stays enforced by tests/test_plugin_contract.py.
-              base_release=""
-              head_release=""
-              if [[ "${base_v}" =~ ^([0-9]+(\.[0-9]+)*) ]]; then
-                base_release="${BASH_REMATCH[1]}"
-              fi
-              if [[ "${head_v}" =~ ^([0-9]+(\.[0-9]+)*) ]]; then
-                head_release="${BASH_REMATCH[1]}"
-              fi
-              if [ "${base_release}" != "${head_release}" ]; then
+              # A PEP 440 local segment carries no release meaning, so a fork
+              # stamping or restamping its local marker is not cutting a release
+              # (3.18.4 -> 3.18.4+adam.1, or a malformed 3.18.4-adam.1 corrected
+              # to 3.18.4+adam.1). Compare public versions, which are equal only
+              # in that case: a change to the release numbers, epoch, pre, post
+              # or dev segment changes the public version and is still a bump.
+              # Cross-manifest agreement stays enforced by
+              # tests/test_plugin_contract.py.
+              base_public="$(python3 .github/scripts/public_version.py "${base_v}")"
+              head_public="$(python3 .github/scripts/public_version.py "${head_v}")"
+              if [ "${base_public}" != "${head_public}" ]; then
                 bumps+=("${path}: ${base_v} -> ${head_v}")
               else
                 echo "Local-segment restamp, not a release bump: ${path} ${base_v} -> ${head_v}"
