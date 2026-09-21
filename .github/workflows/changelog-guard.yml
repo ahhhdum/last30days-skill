@@ -28,10 +28,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+
+          # github.event.pull_request.base.sha is frozen when the PR is created
+          # and is never refreshed as the base branch advances, so a PR whose
+          # base moved forward gets graded against a commit that is no longer
+          # the base — it reports files the base already contains. Resolve the
+          # real merge base at job time. fetch-depth: 0 above populates
+          # refs/remotes/origin, so no extra fetch (or credentials) is needed.
+          BASE_REMOTE_REF="refs/remotes/origin/${BASE_REF}"
+          if ! git rev-parse --verify --quiet "${BASE_REMOTE_REF}" >/dev/null; then
+            echo "::error::Cannot resolve ${BASE_REMOTE_REF}. Checkout must use fetch-depth: 0."
+            exit 1
+          fi
+          BASE_SHA="$(git merge-base "${BASE_REMOTE_REF}" "${HEAD_SHA}")"
+          echo "Base ${BASE_SHA} (merge-base with origin/${BASE_REF})"
 
           LABELS="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/labels" --jq '.[].name')"
           IS_RELEASE=0
@@ -112,7 +126,25 @@ jobs:
             base_v="$(version_at "${BASE_SHA}" "${path}")"
             head_v="$(version_at "${HEAD_SHA}" "${path}")"
             if [ -n "${base_v}" ] && [ -n "${head_v}" ] && [ "${base_v}" != "${head_v}" ]; then
-              bumps+=("${path}: ${base_v} → ${head_v}")
+              # A maintained fork restamps a local-version segment (3.18.4 ->
+              # 3.18.4+adam.1, or a malformed 3.18.4-adam.1 corrected to
+              # 3.18.4+adam.1) without cutting a release. Compare only the
+              # leading release segment: a change there is a real bump, a change
+              # confined to the local/pre suffix is not. Cross-manifest
+              # agreement stays enforced by tests/test_plugin_contract.py.
+              base_release=""
+              head_release=""
+              if [[ "${base_v}" =~ ^([0-9]+(\.[0-9]+)*) ]]; then
+                base_release="${BASH_REMATCH[1]}"
+              fi
+              if [[ "${head_v}" =~ ^([0-9]+(\.[0-9]+)*) ]]; then
+                head_release="${BASH_REMATCH[1]}"
+              fi
+              if [ "${base_release}" != "${head_release}" ]; then
+                bumps+=("${path}: ${base_v} -> ${head_v}")
+              else
+                echo "Local-segment restamp, not a release bump: ${path} ${base_v} -> ${head_v}"
+              fi
             fi
           done
 
