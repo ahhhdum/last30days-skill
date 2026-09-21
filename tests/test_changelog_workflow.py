@@ -224,42 +224,51 @@ class TestChangelogWorkflow(unittest.TestCase):
         with self.assertRaises(SystemExit):
             mod.version_from(".claude-plugin/plugin.json", "{not-json")
 
-    def test_public_version_helper_exempts_only_local_segments(self) -> None:
-        script = ROOT / ".github" / "scripts" / "public_version.py"
+    def test_version_change_helper_exempts_only_local_segments(self) -> None:
+        script = ROOT / ".github" / "scripts" / "version_change.py"
         self.assertTrue(script.is_file())
-        spec = importlib.util.spec_from_file_location("public_version", script)
+        spec = importlib.util.spec_from_file_location("version_change", script)
         assert spec and spec.loader
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        def exempt(base: str, head: str) -> bool:
-            return mod.public_version(base) == mod.public_version(head)
 
-        # A local segment carries no release meaning, so stamping, restamping,
-        # or correcting a malformed local marker is not a release bump.
-        self.assertTrue(exempt("3.18.4", "3.18.4+adam.1"))
-        self.assertTrue(exempt("3.18.4+adam.1", "3.18.4+adam.2"))
-        self.assertTrue(exempt("3.18.4-adam.1", "3.18.4+adam.1"))
-        self.assertTrue(exempt("3.18.4", "3.18.4"))
+        # A local segment carries no release meaning, so stamping, restamping or
+        # dropping a local marker is not a release bump.
+        for base, head in (
+            ("3.18.4", "3.18.4+adam.1"),
+            ("3.18.4+adam.1", "3.18.4+adam.2"),
+            ("3.18.4+adam.1", "3.18.4"),
+            ("3.18.4", "3.18.4"),
+            # The legacy malformed stamp: only the separator moved.
+            ("3.18.4-adam.1", "3.18.4+adam.1"),
+        ):
+            self.assertEqual(mod.classify(base, head), "local", f"{base} -> {head}")
 
-        # Everything that changes the public version is still a bump. The
-        # pre/post/dev promotions matter most: comparing only a numeric prefix
-        # would exempt them and let a release slip past the guard.
-        self.assertFalse(exempt("3.18.4rc1", "3.18.4"))
-        self.assertFalse(exempt("3.18.4.dev1", "3.18.4"))
-        self.assertFalse(exempt("3.18.4.post1", "3.18.4"))
-        self.assertFalse(exempt("1!3.18.4", "3.18.4"))
-        self.assertFalse(exempt("3.18.4", "3.19.0"))
-        self.assertFalse(exempt("3.18.4", "4.0.0"))
-        self.assertFalse(exempt("3.18.4+adam.1", "3.25.0+adam.1"))
-
-        # Non-normalized PEP 440 separators are real markers, not local labels.
-        self.assertFalse(exempt("3.18.4-rc1", "3.18.4"))
-        self.assertFalse(exempt("3.18.4-1", "3.18.4"))
-
-        # An unparseable version compares as itself, so it is reported as a
-        # bump rather than silently exempted.
-        self.assertEqual(mod.public_version("not-a-version"), "not-a-version")
-        self.assertFalse(exempt("not-a-version", "3.18.4"))
+        # Everything that changes the public version is a bump. The pre/post/dev
+        # promotions matter most: comparing a numeric prefix would exempt them
+        # and let a release slip past the guard.
+        for base, head in (
+            ("3.18.4rc1", "3.18.4"),
+            ("3.18.4.dev1", "3.18.4"),
+            ("3.18.4.post1", "3.18.4"),
+            ("1!3.18.4", "3.18.4"),
+            ("3.18.4", "3.19.0"),
+            ("3.18.4", "4.0.0"),
+            ("3.18.4+adam.1", "3.25.0+adam.1"),
+            # Non-normalized PEP 440 separators are real markers, not local
+            # labels: 3.18.4-1 is a post-release, 3.18.4-rc1 a pre-release.
+            ("3.18.4-rc1", "3.18.4"),
+            ("3.18.4-1", "3.18.4"),
+            # The legacy shape is recognized only when the label is unchanged,
+            # so a genuine qualifier promotion is still caught.
+            ("3.18.4-nightly.1", "3.18.4"),
+            ("3.18.4-adam.1", "3.18.4"),
+            ("3.18.4-adam.1", "3.18.4+other.1"),
+            # An unparseable version is reported, never silently exempted.
+            ("not-a-version", "3.18.4"),
+            ("3.18.4", "garbage"),
+        ):
+            self.assertEqual(mod.classify(base, head), "bump", f"{base} -> {head}")
 
     def test_pr_template_has_agent_and_relationship_sections(self) -> None:
         text = (ROOT / ".github" / "PULL_REQUEST_TEMPLATE.md").read_text(
