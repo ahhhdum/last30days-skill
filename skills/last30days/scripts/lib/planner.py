@@ -7,7 +7,7 @@ import re
 import unicodedata
 from collections import Counter
 
-from . import categories, competitors, entity_extract, http, providers, query, relevance, schema
+from . import categories, competitors, entity_extract, http, log, providers, query, relevance, schema
 
 # Hebrew Unicode block: U+0590–U+05FF
 _HEBREW_RE = re.compile(r'[\u0590-\u05FF]')
@@ -150,7 +150,10 @@ SOURCE_CAPABILITIES = {
     "arxiv": {"reference", "analysis", "link"},
     "techmeme": {"discussion", "link", "reference"},
     "trustpilot": {"reference", "company_signal", "social"},
+    "amazon": {"reference", "company_signal", "product_signal"},
+    "meta_ads": {"reference", "company_signal", "product_signal"},
     "xiaohongshu": {"video", "video_shortform", "social"},
+    "telegram": {"discussion", "social"},
     "github": {"discussion", "link"},
     "grounding": {"web", "reference", "link"},
     "perplexity": {"web", "reference", "analysis"},
@@ -372,7 +375,9 @@ def plan_query(
     if provider and model:
         try:
             raw = provider.generate_json(model, prompt)
-            plan = _sanitize_plan(raw, topic, available_sources, requested_sources, depth)
+            plan = _sanitize_plan(
+                raw, topic, available_sources, requested_sources, depth,
+            )
             if plan.subqueries:
                 return plan
         except (ValueError, KeyError, json.JSONDecodeError, OSError, http.HTTPError) as exc:
@@ -464,6 +469,8 @@ def _sanitize_plan(
     available_sources: list[str],
     requested_sources: list[str] | None,
     depth: str,
+    *,
+    honor_plan_sources: bool = False,
 ) -> schema.QueryPlan:
     intent_hint = str(raw.get("intent") or _infer_intent(topic)).strip()
     if intent_hint not in ALLOWED_INTENTS:
@@ -502,6 +509,15 @@ def _sanitize_plan(
         if requested:
             sources = [source for source in sources if source in requested]
         if not sources:
+            if honor_plan_sources:
+                label = str(subquery.get("label") or f"q{index}")
+                log.source_log(
+                    "Planner",
+                    f"Skipping external-plan subquery {label}: none of its planned "
+                    "sources are available under the current source configuration.",
+                    tty_only=False,
+                )
+                continue
             sources = list(source_weights)
         search_query = str(subquery.get("search_query") or "").strip()
         ranking_query = str(subquery.get("ranking_query") or "").strip()
@@ -519,6 +535,11 @@ def _sanitize_plan(
     if depth == "quick" and subqueries:
         subqueries = subqueries[:1]
     if not subqueries:
+        if honor_plan_sources:
+            raise ValueError(
+                "No available planned sources remain. Enable a source named in "
+                "--plan or revise the plan/source configuration; no retrieval was started."
+            )
         return _fallback_plan(topic, available_sources, requested_sources, depth)
 
     intent = intent_hint
@@ -541,6 +562,7 @@ def _sanitize_plan(
                 depth,
                 eligible_sources,
                 requested_sources=requested_sources,
+                honor_plan_sources=honor_plan_sources,
             )
         ),
         source_weights=source_weights,
@@ -576,11 +598,13 @@ def _trim_subqueries_for_depth(
     depth: str,
     available_sources: list[str],
     requested_sources: list[str] | None = None,
+    honor_plan_sources: bool = False,
 ) -> list[schema.SubQuery]:
     # At non-quick depth, expand sources: use capability routing for intents
     # that define it, or all available sources otherwise. The LLM planner may
     # assign narrow source lists; we override to let fusion decide quality.
-    if depth != "quick":
+    # Operator-supplied --plan is a contract: keep per-subquery sources.
+    if depth != "quick" and not honor_plan_sources:
         expanded_sources = _default_sources_for_intent(intent, available_sources)
         return [
             schema.SubQuery(
@@ -835,8 +859,26 @@ def _keyword_query(topic: str, core: str) -> str:
         term for term in compounds
         if re.match(r"^(?:[A-Z][a-z]+\s+){1,}[A-Z][a-z]+$", term)
     ]
-    quoted = " ".join(f'"{term}"' for term in title_cased[:2])
-    keywords = [quoted.strip(), core.strip() or topic.strip()]
+    selected = title_cased[:2]
+    quoted = " ".join(f'"{term}"' for term in selected)
+    remainder = core.strip() or topic.strip()
+    # Drop words already carried by a quoted phrase. Emitting both produced
+    # '"Peter Steinberger" peter steinberger steipete', which reads to a
+    # provider as the phrase AND each of its words again -- strictly narrower
+    # than the phrase alone, and on X it degraded to a bare token conjunction
+    # once the quotes were stripped downstream. Distinct tokens (here
+    # "steipete") are preserved.
+    if selected and remainder:
+        phrase_words = {
+            word.lower()
+            for term in selected
+            for word in term.split()
+        }
+        remainder = " ".join(
+            word for word in remainder.split()
+            if word.strip('"').lower() not in phrase_words
+        )
+    keywords = [quoted.strip(), remainder.strip()]
     return " ".join(part for part in keywords if part).strip()
 
 
