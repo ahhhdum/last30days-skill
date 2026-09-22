@@ -7,7 +7,9 @@ modules build a ``urllib.request.Request`` themselves; ``github.py`` and
 ``http.open_request`` rather than ``urllib.request.urlopen``.
 """
 
+import ast
 import http.server
+import pathlib
 import socketserver
 import threading
 from urllib.request import Request
@@ -71,14 +73,101 @@ def test_open_request_strips_bearer_across_origin():
     )
 
 
+def _dotted_name(node) -> str:
+    """Render a dotted attribute chain (``urllib.request``) or "" if not one."""
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return ""
+    parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
+def _direct_urlopen_calls(source: str) -> list[int]:
+    """Line numbers of calls that reach ``urllib.request.urlopen`` in ``source``.
+
+    Resolved through the module's imports rather than by text match. Searching
+    for the literal ``urllib.request.urlopen(`` would miss
+    ``from urllib.request import urlopen``, a form this repository already uses
+    in four other modules, so a future edit to a credential-bearing module could
+    reintroduce the bypass while keeping the guard green.
+    """
+    tree = ast.parse(source)
+
+    # Names bound to the urlopen function itself.
+    urlopen_names: set[str] = set()
+    # Names bound to the urllib.request module.
+    module_names: set[str] = {"urllib.request"}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.module == "urllib.request":
+                for alias in node.names:
+                    if alias.name == "urlopen":
+                        urlopen_names.add(alias.asname or alias.name)
+            elif node.module == "urllib":
+                for alias in node.names:
+                    if alias.name == "request":
+                        module_names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "urllib.request":
+                    # `import urllib.request` binds "urllib"; an asname binds that.
+                    module_names.add(alias.asname or "urllib.request")
+                elif alias.name == "urllib":
+                    module_names.add(f"{alias.asname or 'urllib'}.request")
+
+    hits: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in urlopen_names:
+            hits.append(node.lineno)
+        elif isinstance(func, ast.Attribute) and func.attr == "urlopen":
+            if _dotted_name(func.value) in module_names:
+                hits.append(node.lineno)
+    return sorted(hits)
+
+
 def test_credential_bearing_modules_do_not_call_urlopen_directly():
     """Regression guard: these modules attach a bearer token to their Request."""
-    import pathlib
-
     lib = pathlib.Path(l30d_http.__file__).parent
     for name in ("github.py", "transcribe.py"):
         source = (lib / name).read_text(encoding="utf-8")
-        assert "urllib.request.urlopen(" not in source, (
-            f"{name} calls urllib.request.urlopen directly, bypassing the "
-            "cross-origin credential strip"
+        hits = _direct_urlopen_calls(source)
+        assert hits == [], (
+            f"{name} calls urllib.request.urlopen directly at line(s) "
+            f"{hits}, bypassing the cross-origin credential strip in "
+            "http.open_request"
         )
+
+
+def test_urlopen_guard_detects_aliased_forms():
+    """The guard itself must not be fooled by an import alias.
+
+    Without this, the guard could silently stop working: a text search for
+    ``urllib.request.urlopen(`` passes on every aliased form below.
+    """
+    detected = (
+        "import urllib.request\nurllib.request.urlopen(req)\n",
+        "from urllib.request import urlopen\nurlopen(req)\n",
+        "from urllib.request import urlopen as uo\nuo(req)\n",
+        "from urllib import request\nrequest.urlopen(req)\n",
+        "from urllib import request as r\nr.urlopen(req)\n",
+        "import urllib.request as ur\nur.urlopen(req)\n",
+    )
+    for source in detected:
+        assert _direct_urlopen_calls(source), f"missed: {source!r}"
+
+    ignored = (
+        # Routed through the protected wrapper — the whole point of the fix.
+        "from . import http\nhttp.open_request(req, timeout=10)\n",
+        # An unrelated urlopen on some other object must not trip the guard.
+        "session.urlopen(req)\n",
+        "from urllib.request import Request\nRequest(url)\n",
+    )
+    for source in ignored:
+        assert not _direct_urlopen_calls(source), f"false positive: {source!r}"
