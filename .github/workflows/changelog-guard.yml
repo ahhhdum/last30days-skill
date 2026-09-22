@@ -28,10 +28,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+
+          # github.event.pull_request.base.sha is frozen when the PR is created
+          # and is never refreshed as the base branch advances, so a PR whose
+          # base moved forward gets graded against a commit that is no longer
+          # the base — it reports files the base already contains. Resolve the
+          # real merge base at job time. fetch-depth: 0 above populates
+          # refs/remotes/origin, so no extra fetch (or credentials) is needed.
+          BASE_REMOTE_REF="refs/remotes/origin/${BASE_REF}"
+          if ! git rev-parse --verify --quiet "${BASE_REMOTE_REF}" >/dev/null; then
+            echo "::error::Cannot resolve ${BASE_REMOTE_REF}. Checkout must use fetch-depth: 0."
+            exit 1
+          fi
+          BASE_SHA="$(git merge-base "${BASE_REMOTE_REF}" "${HEAD_SHA}")"
+          echo "Base ${BASE_SHA} (merge-base with origin/${BASE_REF})"
 
           LABELS="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/labels" --jq '.[].name')"
           IS_RELEASE=0
@@ -112,7 +126,18 @@ jobs:
             base_v="$(version_at "${BASE_SHA}" "${path}")"
             head_v="$(version_at "${HEAD_SHA}" "${path}")"
             if [ -n "${base_v}" ] && [ -n "${head_v}" ] && [ "${base_v}" != "${head_v}" ]; then
-              bumps+=("${path}: ${base_v} → ${head_v}")
+              # A PEP 440 local segment carries no release meaning, so a fork
+              # stamping or restamping its local marker is not cutting a release.
+              # Any change to the release numbers, epoch, pre, post or dev
+              # segment is. See .github/scripts/version_change.py for why the
+              # legacy "3.18.4-adam.1" shape is judged pairwise. Cross-manifest
+              # agreement stays enforced by tests/test_plugin_contract.py.
+              change="$(python3 .github/scripts/version_change.py "${base_v}" "${head_v}")"
+              if [ "${change}" != "local" ]; then
+                bumps+=("${path}: ${base_v} -> ${head_v}")
+              else
+                echo "Local-segment change, not a release bump: ${path} ${base_v} -> ${head_v}"
+              fi
             fi
           done
 
