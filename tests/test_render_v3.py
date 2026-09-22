@@ -129,11 +129,13 @@ class RenderV3Tests(unittest.TestCase):
         self.assertIn("Top clusters:", text)
         self.assertIn("Grounded result", text)
 
-    def test_render_compact_includes_source_errors_section(self):
+    def test_render_compact_omits_source_errors_section(self):
+        # Source errors are diagnostics: the saved raw file (render_full) and
+        # doctor --postmortem carry them; compact stdout does not.
         report = sample_report()
         report.errors_by_source = {"x": "HTTP 400: Bad Request"}
-        text = render.render_compact(report)
-        self.assertIn("## Source Errors", text)
+        self.assertNotIn("## Source Errors", render.render_compact(report))
+        self.assertIn("## Source Errors", render.render_full(report))
 
     def test_failed_x_bookmark_workflow_query_emits_no_solid_floor(self):
         """Regression: generic token overlap must not turn all-zero X noise
@@ -370,7 +372,7 @@ class OutputEnvelopeTests(unittest.TestCase):
         return schema.SourceItem(
             item_id=item_id,
             source="perplexity",
-            title=f"Perplexity Sonar Pro: test topic ({item_id})",
+            title=f"Perplexity Agent: test topic ({item_id})",
             body="AI synthesis body.",
             url="",
             container="perplexity.ai",
@@ -1654,7 +1656,7 @@ class TestSourceUrlsAreClickable(unittest.TestCase):
         empty_url_item = schema.SourceItem(
             item_id="i3",
             source="perplexity",
-            title="Perplexity Sonar Pro: test topic",
+            title="Perplexity Agent: test topic",
             body="AI synthesis body.",
             url="",
             container="perplexity.ai",

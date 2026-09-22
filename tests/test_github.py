@@ -522,6 +522,78 @@ class TestStripSearchQualifiers(unittest.TestCase):
             "langchain",
         )
 
+    def test_paren_wrapped_qualifier_stripped(self):
+        # Wrapper shapes bypassed the strip until the boundary accepted them
+        # (issue #952); a surviving created: would collide with the adapter's
+        # own window and silently zero out the source (issue #949 class).
+        self.assertEqual(
+            github.strip_search_qualifiers("(created:>2025-03-20)"),
+            "",
+        )
+
+    def test_double_quote_wrapped_qualifier_stripped(self):
+        self.assertEqual(
+            github.strip_search_qualifiers('"created:>2025-03-20"'),
+            "",
+        )
+
+    def test_single_quote_wrapped_qualifier_stripped(self):
+        self.assertEqual(
+            github.strip_search_qualifiers("'is:issue'"),
+            "",
+        )
+
+    def test_bracket_wrapped_qualifier_stripped(self):
+        self.assertEqual(
+            github.strip_search_qualifiers("[stars:>1000]"),
+            "",
+        )
+
+    def test_wrapped_qualifier_among_words_leaves_no_empty_pair(self):
+        self.assertEqual(
+            github.strip_search_qualifiers("ai (created:>2025-03-20) model"),
+            "ai model",
+        )
+
+    def test_quoted_value_and_wrapped_qualifier_both_stripped(self):
+        self.assertEqual(
+            github.strip_search_qualifiers('label:"bug fix" (created:>2025-03-20)'),
+            "",
+        )
+
+    def test_wrapped_and_plain_duplicate_qualifiers_both_stripped(self):
+        self.assertEqual(
+            github.strip_search_qualifiers("(created:>2025-03-20) created:>2026-01-01"),
+            "",
+        )
+
+    def test_nested_wrapper_collapses_to_fixpoint(self):
+        self.assertEqual(
+            github.strip_search_qualifiers("((created:>2025-03-20))"),
+            "",
+        )
+
+    def test_missing_closer_qualifier_still_stripped(self):
+        # An opener without its closer ("(created:>2025-03-20") must not leak
+        # the qualifier into the query: only the stray opener survives, and the
+        # collision class (#949) stays dead.
+        result = github.strip_search_qualifiers("(created:>2025-03-20")
+        self.assertNotIn("created:", result)
+
+    def test_quote_wrapped_with_space_inside_does_not_leak_qualifier(self):
+        # '"created:>2025-03-20 abc"' has a space in the quoted value, so it is
+        # not a single wrapper pair; the qualifier itself must still not reach
+        # the query.
+        result = github.strip_search_qualifiers('"created:>2025-03-20 abc"')
+        self.assertNotIn("created:", result)
+
+    def test_wrapped_qualifier_with_glued_term_preserves_term(self):
+        # Mirrors the plain glued-term case: "(created:>2025-03-20,robotics)"
+        # must strip the qualifier and keep the term, with no created: leak.
+        result = github.strip_search_qualifiers("(created:>2025-03-20,robotics)")
+        self.assertIn("robotics", result)
+        self.assertNotIn("created:", result)
+
     def test_case_insensitive_qualifier_only_topic(self):
         self.assertEqual(github.strip_search_qualifiers("Stars:>1000"), "")
 
@@ -574,6 +646,7 @@ class TestSearchGithubQualifiers(unittest.TestCase):
     def _capturing_fetch(self, captured):
         def fake_fetch(url, *args, **kwargs):
             captured["url"] = url
+            captured.setdefault("urls", []).append(url)
             return {"total_count": 0, "items": []}
         return fake_fetch
 
@@ -590,20 +663,96 @@ class TestSearchGithubQualifiers(unittest.TestCase):
                 "open source ai stars:>1000 created:>2025-03-20",
                 "2026-07-01", "2026-07-31",
             )
-        q = self._query(captured["url"])
-        self.assertEqual(q, "open source ai created:>2026-07-01")
-        self.assertEqual(q.count("created:"), 1)
+        queries = [self._query(u) for u in captured["urls"]]
+        # Authenticated searches must carry `is:issue` or `is:pull-request`
+        # (GitHub 422s without one), so the subject is asserted per sub-query
+        # rather than against a single exact string.
+        self.assertEqual(len(queries), 2)
+        for q in queries:
+            self.assertTrue(q.startswith("open source ai created:>2026-07-01"))
+            self.assertEqual(q.count("created:"), 1)
+            self.assertNotIn("stars:", q)
+        self.assertEqual(
+            {q.rsplit(" ", 1)[-1] for q in queries},
+            {"is:issue", "is:pull-request"},
+        )
 
     @patch.object(github, "_resolve_token", return_value="test-token")
-    def test_qualifier_only_topic_errors_without_network(self, mock_token):
+    def test_authenticated_search_merges_issues_and_pull_requests(self, mock_token):
+        """Both qualifier queries run, and their results are deduped and
+        re-sorted by reactions — a plain concatenation would let the second
+        query's tail outrank the first query's head."""
+        issue = {"id": 1, "reactions": {"total_count": 5}}
+        pull = {"id": 2, "reactions": {"total_count": 9}}
+        also_issue = {"id": 1, "reactions": {"total_count": 5}}  # cross-query dupe
+
+        def fake_fetch(url, *args, **kwargs):
+            q = self._query(url)
+            if "is:issue" in q:
+                return {"items": [issue]}
+            return {"items": [pull, also_issue]}
+
+        with patch.object(github, "_fetch_json", side_effect=fake_fetch):
+            envelope = github.search_github("topic", "2026-07-01", "2026-07-31")
+
+        ids = [item["id"] for item in envelope["items"]]
+        self.assertEqual(ids, [2, 1], "expected reaction-sorted, deduped merge")
+
+    @patch.object(github, "_resolve_token", return_value="test-token")
+    def test_authenticated_search_one_partition_fails_keeps_items_and_reports_error(self, mock_token):
+        """If one authenticated partition fails (returns None) and the other
+        returns items, the surviving items are kept but the envelope carries
+        an error so the source is not marked as a clean success."""
+        issue = {"id": 1, "reactions": {"total_count": 5}}
+
+        def fake_fetch(url, *args, **kwargs):
+            q = self._query(url)
+            if "is:issue" in q:
+                return {"items": [issue]}
+            return None  # PR partition failed
+
+        with patch.object(github, "_fetch_json", side_effect=fake_fetch):
+            envelope = github.search_github("topic", "2026-07-01", "2026-07-31")
+
+        self.assertEqual(len(envelope["items"]), 1)
+        self.assertEqual(envelope["items"][0]["id"], 1)
+        self.assertIn("error", envelope)
+        self.assertIn("is:pull-request", envelope["error"])
+        self.assertIn("partition", envelope["error"].lower())
+
+    @patch.object(github, "_resolve_token", return_value="test-token")
+    def test_authenticated_search_both_partitions_fail_is_full_failure(self, mock_token):
+        """If both authenticated partitions fail (return None), the envelope
+        has empty items and carries an error indicating complete failure."""
+
+        with patch.object(github, "_fetch_json", return_value=None):
+            envelope = github.search_github("topic", "2026-07-01", "2026-07-31")
+
+        self.assertEqual(envelope["items"], [])
+        self.assertIn("error", envelope)
+        self.assertIn("GitHub", envelope["error"])
+
+    @patch.object(github, "_resolve_token", return_value=None)
+    def test_unauthenticated_search_omits_qualifier(self, mock_token):
+        """Anonymous /search/issues is still grandfathered without a
+        qualifier, so the single-query path must stay qualifier-free."""
+        captured = {}
+        with patch.object(github, "_fetch_json", side_effect=self._capturing_fetch(captured)):
+            github.search_github("open source ai", "2026-07-01", "2026-07-31")
+        self.assertEqual(len(captured["urls"]), 1)
+        q = self._query(captured["urls"][0])
+        self.assertNotIn("is:issue", q)
+        self.assertNotIn("is:pull-request", q)
+
+    @patch.object(github, "_resolve_token", return_value="test-token")
+    def test_qualifier_only_topic_skips_network(self, mock_token):
         with patch.object(github, "_fetch_json") as mock_fetch:
             result = github.search_github(
                 "created:>2025-03-20", "2026-07-01", "2026-07-31",
             )
         mock_fetch.assert_not_called()
         self.assertEqual(result["items"], [])
-        self.assertIn("error", result)
-        self.assertIn("qualifier", result["error"].lower())
+        self.assertNotIn("error", result)
         self.assertEqual(result["context"]["from_date"], "2026-07-01")
 
     @patch.object(github, "_resolve_token", return_value="test-token")
@@ -634,12 +783,12 @@ class TestSearchGithubQualifiers(unittest.TestCase):
         self.assertNotIn("created:>2025-03-20", q)
 
     @patch.object(github, "_resolve_token", return_value="test-token")
-    def test_empty_topic_errors_without_network(self, mock_token):
+    def test_empty_topic_skips_network(self, mock_token):
         with patch.object(github, "_fetch_json") as mock_fetch:
             result = github.search_github("", "2026-07-01", "2026-07-31")
         mock_fetch.assert_not_called()
         self.assertEqual(result["items"], [])
-        self.assertIn("error", result)
+        self.assertNotIn("error", result)
 
     @patch.object(github, "_resolve_token", return_value="test-token")
     def test_glued_term_after_qualifier_value_reaches_query(self, mock_token):
@@ -652,6 +801,44 @@ class TestSearchGithubQualifiers(unittest.TestCase):
         self.assertIn("robotics", q)
         self.assertIn("ai", q)
         self.assertEqual(q.count("created:"), 1)
+
+    @patch.object(github, "_resolve_token", return_value="test-token")
+    def test_paren_wrapped_qualifier_builds_single_created_query(self, mock_token):
+        # Wrapped qualifier (issue #952) must not survive into the query to
+        # collide with the adapter's own created: window (issue #949 class).
+        # Authenticated search emits is:issue / is:pull-request partitions
+        # (GitHub 422s without one); assert the subject per sub-query.
+        captured = {}
+        with patch.object(github, "_fetch_json", side_effect=self._capturing_fetch(captured)):
+            github.search_github(
+                "open source ai (created:>2025-03-20)", "2026-07-01", "2026-07-31",
+            )
+        queries = [self._query(u) for u in captured["urls"]]
+        self.assertEqual(len(queries), 2)
+        for q in queries:
+            self.assertTrue(q.startswith("open source ai created:>2026-07-01"))
+            self.assertEqual(q.count("created:"), 1)
+            self.assertIn("created:>2026-07-01", q)
+            self.assertNotIn("created:>2025-03-20", q)
+            self.assertIn("open source", q)
+            self.assertIn("ai", q)
+        self.assertEqual(
+            {q.rsplit(" ", 1)[-1] for q in queries},
+            {"is:issue", "is:pull-request"},
+        )
+
+    @patch.object(github, "_resolve_token", return_value="test-token")
+    def test_quote_wrapped_qualifier_only_topic_skips_network(self, mock_token):
+        # A quote-wrapped qualifier-only topic strips to nothing, so the
+        # adapter must skip the network (#949/#952) and return a clean
+        # no-results envelope rather than ERROR (#953).
+        with patch.object(github, "_fetch_json") as mock_fetch:
+            result = github.search_github(
+                '"created:>2025-03-20"', "2026-07-01", "2026-07-31",
+            )
+        mock_fetch.assert_not_called()
+        self.assertEqual(result["items"], [])
+        self.assertNotIn("error", result)
 
 
 if __name__ == "__main__":

@@ -79,6 +79,7 @@ class TestRunAutoSetup:
         assert results["ytdlp_installed"] is True
         assert results["ytdlp_action"] == "already_installed"
         assert results["env_written"] is False
+        assert results["browser_cookie_scan_attempted"] is True
 
     @patch("lib.cookie_extract.extract_cookies_with_source")
     @patch("shutil.which")
@@ -93,6 +94,7 @@ class TestRunAutoSetup:
 
         assert results["cookies_found"] == {}
         mock_extract.assert_not_called()
+        assert results["browser_cookie_scan_attempted"] is False
         assert results["ytdlp_installed"] is False
         assert results["ytdlp_action"] == "no_homebrew"
 
@@ -107,6 +109,7 @@ class TestRunAutoSetup:
         results = setup_wizard.run_auto_setup(config, allow_browser_cookies=True)
 
         assert results["cookies_found"] == {}
+        assert results["browser_cookie_scan_attempted"] is True
 
     @patch("lib.cookie_extract.extract_cookies_with_source")
     @patch("shutil.which")
@@ -154,6 +157,62 @@ class TestRunAutoSetup:
         assert tried.index("chrome") < tried.index("firefox")
         # And it must not route through the silent-first "auto" order.
         assert tried[0] == "chrome"
+
+
+    @patch("lib.cookie_extract.extract_cookies_with_source")
+    @patch("shutil.which")
+    def test_official_only_host_skips_cookie_loop_for_every_domain(self, mock_which, mock_extract):
+        """U6/R5: on an official-only host (LAST30DAYS_HOST=grok-bot) the
+        consented cookie scan is skipped for X AND Truth Social, the result
+        records a neutral note, and the CLI installs (yt-dlp) still run."""
+        mock_extract.return_value = ({"auth_token": "abc", "ct0": "xyz"}, "chrome")
+        mock_which.return_value = "/usr/local/bin/yt-dlp"
+
+        config = {"LAST30DAYS_HOST": "grok-bot"}
+        results = setup_wizard.run_auto_setup(config, allow_browser_cookies=True)
+
+        mock_extract.assert_not_called()
+        assert results["cookies_found"] == {}
+        assert results["browser_cookie_scan_attempted"] is False
+        assert results["cookie_note"] == "browser sessions are not read on this host"
+        # The free CLI installs still run: the yt-dlp probe happened.
+        assert any(call.args[:1] == ("yt-dlp",) for call in mock_which.call_args_list)
+        assert results["ytdlp_installed"] is True
+        assert results["ytdlp_action"] == "already_installed"
+
+    @patch("lib.cookie_extract.extract_cookies_with_source")
+    @patch("shutil.which")
+    def test_official_only_host_status_text_names_no_cookies(self, mock_which, mock_extract):
+        """R4: the setup summary on an official-only host never names cookies."""
+        mock_which.return_value = None
+        results = setup_wizard.run_auto_setup(
+            {"LAST30DAYS_HOST": "grok-bot"}, allow_browser_cookies=True
+        )
+        results["env_written"] = True  # what the CLI sets before rendering
+        text = setup_wizard.get_setup_status_text(results)
+        assert setup_wizard.OFFICIAL_HOST_COOKIE_NOTE in text
+        assert "Configuration saved." in text
+        lowered = text.lower()
+        for banned in ("cookies", "cdp", "box-chrome", "bird", "auth_token", "ct0", "xquik", "browsers"):
+            assert banned not in lowered, f"{banned!r} leaked into setup status text: {text!r}"
+
+    def test_status_text_without_note_keeps_browser_tail(self):
+        """R14: non-Grok hosts keep today's status tail byte for byte."""
+        text = setup_wizard.get_setup_status_text({"env_written": True, "ytdlp_action": "already_installed"})
+        assert "Configuration saved. Future runs will auto-detect your browsers." in text
+
+    @patch("lib.cookie_extract.extract_cookies_with_source")
+    @patch("shutil.which")
+    def test_bird_pin_on_official_only_host_re_enables_cookie_scan(self, mock_which, mock_extract):
+        """KTD7: the exclusive LAST30DAYS_X_BACKEND=bird pin is the one path
+        that re-enables discovery on an official-only host."""
+        mock_extract.return_value = None
+        mock_which.return_value = None
+        config = {"LAST30DAYS_HOST": "grok-bot", "LAST30DAYS_X_BACKEND": "bird"}
+        results = setup_wizard.run_auto_setup(config, allow_browser_cookies=True)
+        assert mock_extract.called
+        assert results["browser_cookie_scan_attempted"] is True
+        assert "cookie_note" not in results
 
 
 class TestYtdlpAutoInstall:
@@ -687,6 +746,7 @@ class TestGetSetupStatusText:
         """Status text mentions found cookies and yt-dlp."""
         results = {
             "cookies_found": {"x": "chrome"},
+            "browser_cookie_scan_attempted": True,
             "ytdlp_installed": True,
             "ytdlp_action": "already_installed",
             "env_written": True,
@@ -696,17 +756,31 @@ class TestGetSetupStatusText:
         assert "yt-dlp already installed" in text
         assert "Configuration saved" in text
 
-    def test_with_no_cookies_no_ytdlp(self):
-        """Status text shows no cookies and suggests yt-dlp install."""
+    def test_skipped_cookie_scan_does_not_claim_x_is_missing(self):
+        """A consent-safe skip reports setup work without an X unlock nudge."""
         results = {
             "cookies_found": {},
+            "browser_cookie_scan_attempted": False,
             "ytdlp_installed": False,
             "ytdlp_action": "no_homebrew",
             "env_written": False,
         }
         text = setup_wizard.get_setup_status_text(results)
-        assert "No browser cookies found" in text
+        assert "browser cookies" not in text.lower()
+        assert "X/Twitter" not in text
         assert "Install Homebrew first" in text
+
+    def test_consented_scan_with_no_match_stays_non_promotional(self):
+        results = {
+            "cookies_found": {},
+            "browser_cookie_scan_attempted": True,
+            "ytdlp_installed": True,
+            "ytdlp_action": "already_installed",
+            "env_written": False,
+        }
+        text = setup_wizard.get_setup_status_text(results)
+        assert "browser cookies" not in text.lower()
+        assert "X/Twitter" not in text
 
     def test_status_text_installed(self):
         """Status text for freshly installed yt-dlp."""
@@ -833,3 +907,89 @@ class TestSetupSubcommand:
         args = parser.parse_args(["AI", "video", "tools"])
         topic = " ".join(args.topic) if args.topic else None
         assert topic.strip().lower() != "setup"
+
+
+class TestBrightDataStatusHonesty:
+    """U5/R11: setup must never claim active unless the engine gate passes."""
+
+    def _patched(self, *, installed, credentialed, off_path=None):
+        available = installed and credentialed
+        return (
+            patch.object(setup_wizard.brightdata, "is_installed", return_value=installed),
+            patch.object(setup_wizard.brightdata, "has_credentials", return_value=credentialed),
+            patch.object(setup_wizard.brightdata, "is_available", return_value=available),
+            patch.object(setup_wizard, "_brightdata_off_path_binary", return_value=off_path),
+        )
+
+    def test_on_path_and_credentialed_reports_engine_active(self):
+        a, b, c, d = self._patched(installed=True, credentialed=True)
+        with a, b, c, d:
+            status = setup_wizard.brightdata_status({})
+        assert status["action"] == "already_installed"
+        assert status["authenticated"] is True
+        assert status["engine_active"] is True
+
+    def test_on_path_without_credentials_is_not_active_and_names_login(self):
+        a, b, c, d = self._patched(installed=True, credentialed=False)
+        with a, b, c, d:
+            status = setup_wizard.brightdata_status({})
+        assert status["action"] == "already_installed"
+        assert status["authenticated"] is False
+        assert status["engine_active"] is False
+        assert "brightdata login" in status["hint"]
+
+    def test_off_path_binary_is_reported_with_its_path(self):
+        """The Hermes/OpenClaw failure mode: on disk, invisible to the engine."""
+        a, b, c, d = self._patched(
+            installed=False, credentialed=True, off_path="/Users/x/.npm-global/bin/brightdata"
+        )
+        with a, b, c, d:
+            status = setup_wizard.brightdata_status({})
+        assert status["action"] == "installed_off_path"
+        assert status["engine_active"] is False
+        assert status["path"] == "/Users/x/.npm-global/bin/brightdata"
+        assert "PATH" in status["hint"]
+
+    def test_absent_binary_recommends_but_never_installs(self):
+        a, b, c, d = self._patched(installed=False, credentialed=False)
+        with a, b, c, d, patch.object(setup_wizard.subprocess, "run") as run:
+            status = setup_wizard.brightdata_status({})
+        assert status["action"] == "not_installed"
+        assert status["engine_active"] is False
+        run.assert_not_called()
+
+    def test_brightdata_is_excluded_from_auto_installed_pp_sources(self):
+        slugs = {slug for _, slug, _ in setup_wizard.PP_DEFAULT_SOURCES}
+        assert "brightdata" not in slugs
+
+
+class TestBrightDataSetupSurface:
+    """The three states must be visible somewhere, or the honesty is moot."""
+
+    def _text(self, status):
+        return setup_wizard.get_setup_status_text({
+            "cookies_found": {}, "ytdlp_installed": True,
+            "ytdlp_action": "already_installed", "digg_installed": True,
+            "digg_action": "already_installed", "pp_sources": {},
+            "brightdata": status, "env_written": False,
+        })
+
+    def test_active_state_is_reported(self):
+        text = self._text({"action": "already_installed", "engine_active": True})
+        assert "Bright Data CLI ready" in text
+
+    def test_installed_but_not_logged_in_names_the_fix(self):
+        text = self._text({"action": "already_installed", "engine_active": False})
+        assert "brightdata login" in text
+
+    def test_off_path_reports_the_path_and_the_fix(self):
+        text = self._text({
+            "action": "installed_off_path", "engine_active": False,
+            "path": "/Users/x/.npm-global/bin/brightdata",
+        })
+        assert "/Users/x/.npm-global/bin/brightdata" in text
+        assert "PATH" in text
+
+    def test_absent_offers_the_install_command_without_running_it(self):
+        text = self._text({"action": "not_installed", "engine_active": False})
+        assert "npm i -g @brightdata/cli" in text
