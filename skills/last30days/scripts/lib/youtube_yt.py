@@ -1092,7 +1092,10 @@ def fetch_transcripts_parallel(
 
     results = {}
     statuses: Dict[str, Dict[str, Any]] = {vid: {} for vid in video_ids}
-    with tempfile.TemporaryDirectory() as temp_dir:
+    # A timed-out yt-dlp can outlive its kill on Windows (a launcher shim dies,
+    # the real process keeps its .vtt.part open). Deleting that file raises
+    # WinError 32 and would abort the whole run, so cleanup errors are ignored.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
                 http.submit_with_context(

@@ -1,0 +1,1 @@
+A timed-out YouTube transcript fetch no longer aborts the whole run on Windows. When yt-dlp runs through a launcher shim, a timeout kills the shim while the real process keeps its `.vtt.part` file open, and deleting the transcript temp directory raised `WinError 32` out of the pipeline. Cleanup errors in that directory are now ignored.

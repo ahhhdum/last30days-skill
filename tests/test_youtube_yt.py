@@ -1375,5 +1375,25 @@ class TestYtdlpPlayerClient(unittest.TestCase):
         self.assertEqual(youtube_yt._inject_youtube_player_client(cmd), cmd)
 
 
+class TestFetchTranscriptsParallelCleanup(unittest.TestCase):
+    def test_locked_partial_file_does_not_abort_the_run(self):
+        # Regression: an orphaned yt-dlp held its .vtt.part open, and the
+        # temp-dir cleanup raised WinError 32 out of the whole pipeline. The
+        # open handle reproduces the lock on Windows; elsewhere it is a no-op.
+        handles = []
+
+        def fake_fetch(video_id, temp_dir, status=None, token=None):
+            handles.append(open(Path(temp_dir) / f"{video_id}.en.vtt.part", "w"))
+            return f"transcript for {video_id}"
+
+        try:
+            with mock.patch.object(youtube_yt, "fetch_transcript", side_effect=fake_fetch):
+                results = youtube_yt.fetch_transcripts_parallel(["abc123"])
+        finally:
+            for handle in handles:
+                handle.close()
+        self.assertEqual({"abc123": "transcript for abc123"}, results)
+
+
 if __name__ == "__main__":
     unittest.main()
