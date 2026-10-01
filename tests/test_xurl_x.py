@@ -413,6 +413,30 @@ class TestSearchX(unittest.TestCase):
         self.assertIn("--auth", call_args)
         self.assertEqual(call_args[call_args.index("--auth") + 1], "app")
 
+    def test_drops_bare_and_or_that_x_rejects(self):
+        # Regression: X answers a bare "and"/"or" with 400 "Ambiguous use of
+        # and as a keyword", which failed every search for an English topic.
+        completed = mock.Mock(returncode=0, stdout=json.dumps({}))
+        with mock.patch("subprocess.run", return_value=completed) as run_mock:
+            xurl_x.search_x("pricing and packaging or bundles AND tiers")
+        call_args = run_mock.call_args[0][0]
+        self.assertEqual("pricing packaging bundles tiers", call_args[2])
+
+    def test_keeps_uppercase_or_and_quoted_phrases(self):
+        completed = mock.Mock(returncode=0, stdout=json.dumps({}))
+        with mock.patch("subprocess.run", return_value=completed) as run_mock:
+            xurl_x.search_x('"rock and roll" OR jazz')
+        call_args = run_mock.call_args[0][0]
+        self.assertEqual('"rock and roll" OR jazz', call_args[2])
+
+    def test_empty_query_after_sanitizing_skips_the_cli(self):
+        with mock.patch(
+            "subprocess.run",
+            side_effect=AssertionError("an empty query must not spawn xurl"),
+        ):
+            result = xurl_x.search_x("and or")
+        self.assertEqual(xurl_x.ERR_EMPTY_QUERY, result["error"])
+
     def test_max_results_clamped_to_100(self):
         # DEPTH_CONFIG["deep"] = 60, should stay at 60 (within 10-100 range)
         completed = mock.Mock(returncode=0, stdout=json.dumps({}))

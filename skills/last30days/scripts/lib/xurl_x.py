@@ -252,6 +252,27 @@ ERR_FAILED = "xurl: search failed"
 ERR_INVALID_JSON = "xurl: invalid JSON from xurl"
 ERR_NOT_FOUND = "xurl not found in PATH"
 ERR_TIMED_OUT = "xurl search timed out (30s)"
+ERR_EMPTY_QUERY = "xurl: empty query after sanitizing"
+
+# A quoted phrase, or one bare token.
+_QUERY_TERM_RE = re.compile(r'"[^"]*"|\S+')
+
+
+def _drop_ambiguous_keywords(query: str) -> str:
+    """Drop bare ``and``/``or`` tokens that X rejects as ambiguous keywords.
+
+    X search joins space-separated terms with AND and accepts only uppercase
+    ``OR`` as an operator. A bare ``and``, ``AND`` or lowercase ``or`` fails the
+    whole request with 400 "Ambiguous use of and as a keyword", so any topic
+    phrased in plain English ("pricing and packaging") returned nothing.
+    Dropping the word keeps the AND meaning. Uppercase ``OR`` and quoted
+    phrases pass through untouched. x_api.build_query drops the same tokens.
+    """
+    kept = [
+        term for term in _QUERY_TERM_RE.findall(query or "")
+        if term.startswith('"') or term == "OR" or term.lower() not in ("and", "or")
+    ]
+    return " ".join(kept)
 
 
 def _classify_cli_failure(output: str) -> str:
@@ -289,6 +310,9 @@ def search_x(
     max_results = DEPTH_CONFIG.get(depth, DEPTH_CONFIG["default"])
     # X API v2 search/recent requires max_results in 10–100 range
     max_results = max(10, min(100, max_results))
+    query = _drop_ambiguous_keywords(query)
+    if not query:
+        return {"error": ERR_EMPTY_QUERY}
 
     try:
         # --auth app (app-only bearer): xurl >=1.1 mis-signs OAuth1 requests
