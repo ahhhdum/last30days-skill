@@ -1,0 +1,1 @@
+SKILL.md documents a restricted-shell invocation path for hosts whose managed permission policy denies `command`, `find`, heredocs, or `python -c` (an organization-managed Claude Code account, for example): resolve the interpreter with `which`, write the query plan with the host's file-write tool, and run the engine as one plain command with no pipe or wrapper.
