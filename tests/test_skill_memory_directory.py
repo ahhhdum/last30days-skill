@@ -18,13 +18,15 @@ BASH = shutil.which("bash")
 
 @pytest.fixture
 def shell_env(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     return {
         "PATH": str(bin_dir),
-        "HOME": str(Path.home()),
+        "HOME": str(home),
         "LAST30DAYS_PYTHON": sys.executable,
         "SKILL_DIR": str(SKILL),
         "LAST30DAYS_CONFIG_DIR": str(config_dir),
@@ -45,17 +47,19 @@ def write_config(path, text):
         ("/tmp/global", "/tmp/process research", "/tmp/process research"),
         ("/tmp/global", "", ""),
         ("", None, ""),
-        (None, None, str(Path.home() / "Documents" / "Last30Days")),
+        (None, None, None),
         ("/tmp/configured research", "${user_config.memory_dir}", "/tmp/configured research"),
         ("", "${user_config.memory_dir}", ""),
-        (None, "${user_config.memory_dir}", str(Path.home() / "Documents" / "Last30Days")),
-        ("${user_config.memory_dir}", None, str(Path.home() / "Documents" / "Last30Days")),
+        (None, "${user_config.memory_dir}", None),
+        ("${user_config.memory_dir}", None, None),
         ("${user_config.memory_dir}", "", ""),
         ("/tmp/configured research", "  ${user_config.memory_dir}  ", "/tmp/configured research"),
         (None, "/tmp/${user_config.memory_dir}/research", "/tmp/${user_config.memory_dir}/research"),
     ],
 )
 def test_documented_memory_resolution(global_value, process_value, expected, shell_env, tmp_path):
+    if expected is None:
+        expected = str(Path(shell_env["HOME"]) / "Documents" / "Last30Days")
     if global_value is not None:
         write_config(
             Path(shell_env["LAST30DAYS_CONFIG_DIR"]) / ".env",
