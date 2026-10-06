@@ -14,6 +14,9 @@ import socketserver
 import threading
 from urllib.request import Request
 
+import pytest
+
+from lib import github, transcribe
 from lib import http as l30d_http
 
 
@@ -66,11 +69,81 @@ def test_open_request_strips_bearer_across_origin():
     finally:
         victim.shutdown()
         attacker.shutdown()
+        victim.server_close()
+        attacker.server_close()
 
     assert "authorization" not in _CaptureHandler.captured, (
         "bearer token survived a cross-origin redirect: "
         f"{_CaptureHandler.captured.get('authorization')!r}"
     )
+
+
+@pytest.mark.parametrize("caller", ["github_json", "github_readme", "transcribe"])
+@pytest.mark.parametrize("cross_origin", [False, True], ids=["same_origin", "cross_origin"])
+def test_credential_callers_handle_redirects(caller, cross_origin, monkeypatch, tmp_path):
+    captured = []
+    payload = b'{"ok":true,"text":"loopback transcript"}'
+    token = "dummy_redirect_caller_token"
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            captured.append((self.path, dict(self.headers.items())))
+            if self.path == "/start":
+                self.send_response(302)
+                self.send_header("Location", destination)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            else:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            self.do_GET()
+
+        def log_message(self, *_args):
+            pass
+
+    origin = _serve(Handler)
+    target = _serve(Handler) if cross_origin else origin
+    start = f"http://127.0.0.1:{origin.server_address[1]}/start"
+    destination = f"http://127.0.0.1:{target.server_address[1]}/result"
+    try:
+        if caller == "github_json":
+            assert github._fetch_json(start, token=token) == {
+                "ok": True, "text": "loopback transcript",
+            }
+        elif caller == "github_readme":
+            def loopback_request(url, *args, **kwargs):
+                if url == "https://api.github.com/repos/owner/repo/readme":
+                    url = start
+                return Request(url, *args, **kwargs)
+
+            monkeypatch.setattr(github.urllib.request, "Request", loopback_request)
+            assert github._fetch_readme_snippet("owner/repo", token) == payload.decode()
+        else:
+            monkeypatch.setitem(transcribe._PROVIDER_ENDPOINTS, "groq", start)
+            audio = tmp_path / "audio.mp3"
+            audio.write_bytes(b"dummy audio")
+            assert transcribe._post_audio("groq", str(audio), token, 10) == "loopback transcript"
+    finally:
+        origin.shutdown()
+        origin.server_close()
+        if target is not origin:
+            target.shutdown()
+            target.server_close()
+
+    assert [path for path, _ in captured] == ["/start", "/result"]
+    original_headers, final_headers = (
+        {key.lower(): value for key, value in headers.items()}
+        for _, headers in captured
+    )
+    assert original_headers["authorization"] == f"Bearer {token}"
+    assert final_headers.get("authorization") == (None if cross_origin else f"Bearer {token}")
+    assert final_headers["user-agent"] == original_headers["user-agent"]
 
 
 def _dotted_name(node) -> str:
