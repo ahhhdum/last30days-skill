@@ -14,8 +14,21 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(scope="module")
+def workflow_bash():
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("Changelog workflow requires Bash with the mapfile builtin")
+    probe = subprocess.run(
+        [bash, "-c", "type -t mapfile"], text=True, capture_output=True,
+    )
+    if probe.returncode != 0 or probe.stdout.strip() != "builtin":
+        pytest.skip(f"Changelog workflow requires mapfile; unavailable in {bash}")
+    return bash
+
+
 @pytest.fixture
-def history(tmp_path):
+def history(tmp_path, workflow_bash):
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env.update(
         GIT_CONFIG_NOSYSTEM="1",
@@ -67,7 +80,7 @@ def history(tmp_path):
     def run(head, *, base_ref="main", labels="", author="contributor", event_base=None):
         git("update-ref", f"refs/remotes/origin/{base_ref}", release)
         return subprocess.run(
-            ["bash", "-c", 'gh() { printf "%s\\n" "$TEST_LABELS"; }\n' + script],
+            [workflow_bash, "-c", 'gh() { printf "%s\\n" "$TEST_LABELS"; }\n' + script],
             cwd=tmp_path, text=True, capture_output=True,
             env={
                 **env,
