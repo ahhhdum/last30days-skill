@@ -86,6 +86,13 @@ class PlannerV3Tests(unittest.TestCase):
                     ["automated playtesting", ""],
                     [subquery.x_query for subquery in plan.subqueries],
                 )
+                # Saved plans and cached reports round-trip the field.
+                from lib import schema
+                restored = schema.query_plan_from_dict(schema.to_dict(plan))
+                self.assertEqual(
+                    ["automated playtesting", ""],
+                    [subquery.x_query for subquery in restored.subqueries],
+                )
 
     def test_external_plan_rejects_non_string_x_query(self):
         raw = {

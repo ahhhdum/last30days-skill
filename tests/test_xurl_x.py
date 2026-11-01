@@ -484,14 +484,14 @@ class TestSearchXQuerySanitization(unittest.TestCase):
         self.assertEqual(run_mock.call_args[0][0][2], "claude code -is:retweet")
 
     def test_trailing_colon_keeps_python_subject(self):
-        self.assertTrue(self._argv_query("Python: what's new").startswith("python what's"))
+        self.assertEqual(self._argv_query("Python: what's new"), "Python what's new")
 
     def test_trailing_colon_keeps_cplusplus_subject(self):
-        self.assertEqual(self._argv_query("C++: memory safety"), "c++ memory safety")
+        self.assertEqual(self._argv_query("C++: memory safety"), "C++ memory safety")
 
     def test_trailing_colon_still_drops_operators_and_negation(self):
         query = self._argv_query("Python: from:attacker since:2020-01-01 -spam and review")
-        self.assertEqual(query, "python")
+        self.assertEqual(query, "Python review")
 
     def test_colon_operator_tokens_are_dropped(self):
         self.assertEqual(self._argv_query("from:x claude since:2020-01-01 code"), "claude code")
@@ -520,6 +520,20 @@ class TestSearchXCoreKeywords(unittest.TestCase):
 
     def test_short_topic_is_unchanged(self):
         self.assertEqual(xurl_x.keyword_query("claude code"), "claude code")
+
+    def test_short_query_keeps_words_the_noise_list_would_drop(self):
+        for topic in ("best buy", "code review", "New York", "nano banana sprites"):
+            with self.subTest(topic=topic):
+                self.assertEqual(xurl_x.keyword_query(topic), topic)
+
+    def test_repost_filter_fits_inside_the_query_cap(self):
+        topic = " ".join(["a" * 100] * 5)
+        completed = mock.Mock(returncode=0, stdout=json.dumps({}))
+        with mock.patch("subprocess.run", return_value=completed) as run_mock:
+            xurl_x.search_x(topic)
+        sent = run_mock.call_args[0][0][2]
+        self.assertLessEqual(len(sent), xurl_x.x_api.MAX_QUERY_CHARS)
+        self.assertTrue(sent.endswith(" " + xurl_x.EXCLUDE_REPOSTS))
 
     def test_zero_posts_does_not_retry_with_a_shorter_prefix(self):
         # A prefix cut drops the subject and returns spam; zero is honest.

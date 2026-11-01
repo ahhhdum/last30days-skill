@@ -487,8 +487,7 @@ Only show lines for platforms where something was resolved. Skip empty lines. On
       "search_query": "kanye west",
       "ranking_query": "What notable events involving Kanye West happened in the last 30 days?",
       "sources": ["reddit", "x", "hackernews", "youtube", "tiktok", "instagram"],
-      "weight": 1.0,
-      "x_query": "kanye west"
+      "weight": 1.0
     },
     {
       "label": "album",
@@ -514,12 +513,7 @@ Only show lines for platforms where something was resolved. Skip empty lines. On
 - `search_query` should be concise and keyword-heavy - match how content is TITLED on platforms
 - `ranking_query` should read like a natural language question
 - **X disambiguation:** express your disambiguation intent in `ranking_query` (e.g., "What are people saying about Rome the city in Italy, not AS Roma or Rome Odunze?") — do not phrase-quote `search_query` for X or invent X operators; the engine handles X query compilation internally.
-- **`x_query` (optional, set it on every subquery that includes `x`).** X keyword search (the xurl and X API backends) returns only posts containing every word, ranks by newest rather than relevance, and covers 7 days. A long `search_query` returns zero posts there. Without `x_query`, X searches the raw topic cut to its first 5 core words. A good `x_query`:
-  - is 2 or 3 words, and includes the topic's most specific word (`automated playtesting`, `game sprites AI`, `claude code playtest`);
-  - prefers proper names, products and handles people actually type (`nano banana`, `claude code`) over descriptions;
-  - never consists only of generic words (`ai agent automated` returned crypto spam for a playtesting topic);
-  - puts different angles in different subqueries instead of stacking three specific words in one (`automated playtesting deterministic` returned 0 posts while `automated playtesting` returned a full page);
-  - has no quotes, operators, dates, or `and`/`or`. The engine strips them and excludes reposts itself.
+- **`x_query`** (each `x` subquery): 2-3 words as people write them, with the most specific term (`automated playtesting`). X needs every word: long returns 0, generic returns spam.
 - For collision-prone people, set `"person_identity_anchors"` to bare verified org names (`["Digg"]`); evidence must name one. Only the X subject is exempt.
 - **DISAMBIGUATION (mandatory for collision-prone names — the #1 cause of off-topic noise).** Anchor the `search_query` with the disambiguating context you resolved in Step 0.5 / 0.55 — the entity's company, role, or domain — when the topic name (a) is a common word or has non-product meanings ("Loom" = weaving tool, "Tella" = soccer player), OR (b) is a PERSON whose name collides with other public figures or common words. Apply the anchor to **EVERY subquery, not just the primary**, and mirror it in the `ranking_query`. Anchor on a SPECIFIC named entity (a company/product/firm), not a generic domain word. Examples: `"kevin rose digg founder"` not `"kevin rose"` (collides with Kevin Warsh / Leon Rose / Kevin Hart); `"lan xuezhao basis set ventures"` not `"lan xuezhao"` (collides with "Lanzhou" food, cdrama edits); `"trevin chow compound engineering"` not `"trevin chow"` (collides with Trevin Wax / Trevin Brown); `"tella screen recording"` not `"tella"`. The `ranking_query` carries the same anchor: `"ranking_query": "What has Kevin Rose, founder of Digg, been doing in the last 30 days?"`, not a bare `"...Kevin Rose..."`. When the name is globally unambiguous (Kanye West, Nvidia, Peter Steinberger/OpenClaw), no anchor is needed.
 - **For comparison queries**, each main-entity subquery should include TOPIC_A's product category: "tella screen recorder review" not just "tella review".

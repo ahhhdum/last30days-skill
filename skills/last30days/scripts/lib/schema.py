@@ -485,6 +485,7 @@ def subquery_from_dict(payload: dict[str, Any]) -> SubQuery:
         ranking_query=payload["ranking_query"],
         sources=list(payload.get("sources") or []),
         weight=float(payload.get("weight") or 1.0),
+        x_query=str(payload.get("x_query") or ""),
     )
 
 

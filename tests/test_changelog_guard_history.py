@@ -73,6 +73,11 @@ def history(tmp_path, workflow_bash):
     parser = tmp_path / ".github/scripts/read_manifest_version.py"
     parser.parent.mkdir(parents=True)
     shutil.copyfile(ROOT / ".github/scripts/read_manifest_version.py", parser)
+    # Fork: the guard also calls version_change.py to exempt +adam.N markers.
+    shutil.copyfile(
+        ROOT / ".github/scripts/version_change.py",
+        parser.parent / "version_change.py",
+    )
     workflow = yaml.safe_load((ROOT / ".github/workflows/changelog-guard.yml").read_text())
     step = next(step for step in workflow["jobs"]["guard"]["steps"] if "run" in step)
     script = step["run"].replace("${{ github.repository }}", "example/repository")

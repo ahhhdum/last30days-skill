@@ -293,20 +293,29 @@ EXCLUDE_REPOSTS = "-is:retweet"
 
 
 def keyword_query(topic: str) -> str:
-    """Return the topic as at most ``CORE_KEYWORDS`` sanitized keywords.
+    """Return the topic as sanitized keywords, cut to the core when long.
 
     Sanitized by ``x_api.build_keyword_query`` (no operators, no bare
-    and/or) before the cut, so dropped tokens never take a slot. Returns ""
-    when nothing lexical survives.
+    and/or) first, so dropped tokens never take a slot. A query of at most
+    ``CORE_KEYWORDS`` words is kept as written: the noise filter would turn
+    "best buy" into "buy" and "New York" into "york". A longer topic is cut
+    to its core keywords. The result leaves room for ``EXCLUDE_REPOSTS``
+    inside X's query cap. Returns "" when nothing lexical survives.
     """
     keywords = x_api.build_keyword_query(topic)
     if not keywords:
         return ""
-    core = query_lib.extract_core_subject(
-        keywords, max_words=CORE_KEYWORDS, strip_suffixes=True
-    )
-    # X matching is case-insensitive; the core extractor lowercases.
-    return x_api.build_keyword_query(core) or keywords
+    if len(keywords.split()) > CORE_KEYWORDS:
+        core = query_lib.extract_core_subject(
+            keywords, max_words=CORE_KEYWORDS, strip_suffixes=True
+        )
+        # X matching is case-insensitive; the core extractor lowercases.
+        keywords = x_api.build_keyword_query(core) or keywords
+    words = keywords.split()
+    room = x_api.MAX_QUERY_CHARS - len(EXCLUDE_REPOSTS) - 1
+    while len(words) > 1 and len(" ".join(words)) > room:
+        words.pop()
+    return " ".join(words)[:room].strip()
 
 
 def search_x(

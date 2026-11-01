@@ -152,6 +152,27 @@ The repo vendors a search-only subset of Bird's Twitter GraphQL client and shell
 | default | 20-30 | 30 | 120s | 45s |
 | `--deep` | 40-60 | 60 | 180s | 60s |
 
+### Writing a good X search (`x_query`)
+
+The xurl and X API backends use X's keyword search. It returns only posts that contain every word, lists the newest first rather than the most relevant, and covers the last 7 days. A plan can set `x_query` on each subquery to give X its own short search. Without one, X searches the topic: up to 5 words as written, or the topic's first 5 core words when it is longer. The xurl backend also excludes reposts.
+
+Measured on 2026-11-01 (posts returned, page size 10):
+
+| Search | Posts | Why |
+|---|---|---|
+| `ai generated game art consistent style with coding agents` | 0 | Every word must appear in one post |
+| `automated playtesting deterministic` | 0 | Three specific words rarely appear together |
+| `automated playtesting` | 10 | Specific subject, nothing extra |
+| `claude code playtest` | 10 | A name people type, plus the subject |
+| `ai agent automated` | 10, crypto spam | Only generic words |
+
+What works:
+- 2 or 3 words, including the topic's most specific term.
+- Words in the order people write them. The X API backend matches `x_query` as one exact phrase.
+- Product names and handles people actually type (`nano banana`, `claude code`) over descriptions.
+- One angle per subquery. Split "playtesting" and "deterministic replay" into two subqueries instead of stacking them.
+- No quotes, operators, dates, or `and`/`or`. The engine strips them.
+
 ---
 
 ## Post-Processing (both sources)
