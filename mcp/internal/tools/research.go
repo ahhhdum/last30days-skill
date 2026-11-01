@@ -25,6 +25,12 @@ type Config struct {
 // browser-cookie consent and configuration.
 const BrowserCookiesEnvOverride = "LAST30DAYS_MCP_ALLOW_BROWSER_COOKIES"
 
+// allowEnginePlanEnv lets the engine use its internal planner. The research
+// tool has no query-plan argument, so the engine must plan for itself; without
+// this, an MCP server launched from an agent shell (which inherits markers such
+// as CLAUDECODE) would hit the engine's LAW 7 host-plan gate and exit 2.
+const allowEnginePlanEnv = "LAST30DAYS_ALLOW_ENGINE_PLAN=1"
+
 // Register adds every tool this server exposes to s. The caller supplies a
 // Config so test harnesses can pin a version without touching globals.
 func Register(s *server.MCPServer, cfg Config) {
@@ -78,11 +84,19 @@ func makeResearchHandler(cfg Config) server.ToolHandlerFunc {
 			)), nil
 		}
 
-		runArgs := researchRunArgs(topic, emit, save)
+		saveDir := ""
+		if save {
+			saveDir, err = resolveSaveDir(ctx, cacheDir)
+			if err != nil {
+				return mcplib.NewToolResultError(err.Error()), nil
+			}
+		}
+		runArgs := researchRunArgs(topic, emit, saveDir)
 
 		res, runErr := engine.Run(ctx, engine.RunOptions{
 			CacheDir: cacheDir,
 			Args:     runArgs,
+			ExtraEnv: researchExtraEnv(),
 		})
 		if runErr != nil {
 			return mcplib.NewToolResultError(formatRunError(runErr, res)), nil
@@ -91,15 +105,22 @@ func makeResearchHandler(cfg Config) server.ToolHandlerFunc {
 	}
 }
 
-func researchRunArgs(topic, emit string, save bool) []string {
-	runArgs := []string{topic, "--emit=" + emit}
+func researchRunArgs(topic, emit, saveDir string) []string {
+	// Options first, positional topic last behind a `--` separator: a
+	// dash-prefixed topic must never be parsed as engine flags.
+	runArgs := []string{"--research-only", "--emit=" + emit}
 	if !browserCookiesAllowed() {
 		runArgs = append(runArgs, "--no-browser-cookies")
 	}
-	if save {
-		runArgs = append(runArgs, "--save-dir", mcpSaveDir())
-	}
-	return runArgs
+	// Always pass --save-dir explicitly. An empty value skips the engine's
+	// `is None` LAST30DAYS_MEMORY_DIR fallback and is falsy at the save
+	// gate, so declining to save writes nothing even when the env var set.
+	runArgs = append(runArgs, "--save-dir", saveDir)
+	return append(runArgs, "--", topic)
+}
+
+func researchExtraEnv() []string {
+	return []string{allowEnginePlanEnv}
 }
 
 func browserCookiesAllowed() bool {
@@ -110,12 +131,15 @@ func browserCookiesAllowed() bool {
 		strings.EqualFold(raw, "on")
 }
 
-func mcpSaveDir() string {
-	saveDir := os.Getenv("LAST30DAYS_MEMORY_DIR")
-	if saveDir == "" {
-		return "~/Documents/Last30Days"
+func resolveSaveDir(ctx context.Context, cacheDir string) (string, error) {
+	res, err := engine.Run(ctx, engine.RunOptions{
+		CacheDir: cacheDir,
+		Args:     []string{"--resolve-save-dir"},
+	})
+	if err != nil {
+		return "", fmt.Errorf("save directory resolution failed: %s", formatRunError(err, res))
 	}
-	return saveDir
+	return strings.TrimSuffix(strings.TrimSuffix(string(res.Stdout), "\n"), "\r"), nil
 }
 
 func requireString(args map[string]any, name string) (string, error) {

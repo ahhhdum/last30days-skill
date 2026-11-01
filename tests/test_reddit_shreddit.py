@@ -12,6 +12,21 @@ def _html():
     return FIXTURE.read_text(encoding="utf-8")
 
 
+# The partial after a DOM round-trip: HTML attribute names are case-insensitive,
+# so a serializer writes ``thingId`` as ``thingid``. Values keep their case.
+LOWERCASED_ATTR_HTML = """
+<shreddit-comment-tree-stats total-comments="2" sort="TOP"></shreddit-comment-tree-stats>
+<shreddit-comment created="2026-08-09T12:45:51+0000" author="AliceCooper" thingid="t1_aaa"
+  permalink="/r/videos/comments/x1/comment/aaa/" score="1136" depth="0">
+  <div id="t1_aaa-post-rtjson-content"><div><p>First body about $750 pending.</p></div></div>
+</shreddit-comment>
+<shreddit-comment created="2026-08-09T12:46:00+0000" author="bob" thingid="t1_bbb"
+  permalink="/r/videos/comments/x1/comment/bbb/" score="42" depth="0">
+  <div id="t1_bbb-post-rtjson-content"><div><p>Second body.</p></div></div>
+</shreddit-comment>
+"""
+
+
 class TestExtractPostRef:
     def test_extracts_sub_and_id(self):
         ref = rs.extract_post_ref("https://www.reddit.com/r/Rakuten/comments/1taeiw0/title/")
@@ -59,14 +74,23 @@ class TestParseComments:
         assert any("$750" in b or "pending" in b for b in bodies)
 
     def test_comment_url_built(self):
-        for c in rs.parse_comments(_html()):
-            if c["url"]:
-                assert c["url"].startswith("https://reddit.com/r/")
+        comments = rs.parse_comments(_html())
+        assert [c["url"] for c in comments] == [
+            f"https://reddit.com/r/Rakuten/comments/1taeiw0/comment/{comment_id}/"
+            for comment_id in (
+                "ol8tp8n", "olcy1iv", "olaqzjk", "omlbiqg", "ol8undb", "ol8w8w6", "synthneg"
+            )
+        ]
 
     def test_empty_html_returns_empty(self):
         assert rs.parse_comments("") == []
         assert rs.parse_comments("<html>no comments here</html>") == []
 
+    def test_lowercased_attribute_names_parsed(self):
+        comments = rs.parse_comments(LOWERCASED_ATTR_HTML)
+        assert [c["score"] for c in comments] == [1136, 42]
+        assert comments[0]["author"] == "AliceCooper"  # values keep their case
+        assert "$750" in comments[0]["body"]
 
 class TestBotFilter:
     """Bot comments occupy top-comment slots without carrying community signal."""
@@ -150,7 +174,8 @@ class TestFetchComments:
 
     def test_fetch_failure_returns_empty(self):
         url = "https://www.reddit.com/r/Rakuten/comments/1taeiw0/title/"
-        with mock.patch.object(rs.http, "get_text", return_value=None):
+        with mock.patch.object(rs.http, "get_text", return_value=None), \
+             mock.patch.object(rs.reddit_arctic, "fetch_post_comments", return_value=[]):
             out = rs.fetch_comments(url)
         assert out["top_comments"] == [] and out["num_comments"] is None
 
@@ -171,3 +196,61 @@ class TestEnrichmentBudget:
         out = rs.parse_comments(html)
         assert len(out) == rs.MAX_COMMENTS == 12
         assert [c["score"] for c in out] == list(range(100, 88, -1))
+
+
+class TestFetchCommentsFallback:
+    """fetch_comments falls back to the arctic-shift archive when the shreddit
+    comment partials return nothing (datacenter egress 403)."""
+
+    URL = "https://www.reddit.com/r/Rakuten/comments/1taeiw0/title/"
+
+    def _arctic_comment(self, score=10, body="great thread", author="u"):
+        return {
+            "score": score, "date": "2026-07-02", "author": author,
+            "body": body, "excerpt": body[:200], "permalink": "/r/Rakuten/comments/1taeiw0/x/",
+            "url": "https://reddit.com/r/Rakuten/comments/1taeiw0/x/",
+        }
+
+    def test_arctic_fallback_when_shreddit_empty(self):
+        comments = [self._arctic_comment(score=42)]
+        with mock.patch.object(rs.http, "get_text", return_value=None), \
+             mock.patch.object(rs.reddit_arctic, "fetch_post_comments",
+                               return_value=comments) as arctic:
+            out = rs.fetch_comments(self.URL, deadline=123.0)
+        assert out["top_comments"] == [{
+            "score": 42, "date": "2026-07-02", "author": "u",
+            "excerpt": "great thread", "url": "https://reddit.com/r/Rakuten/comments/1taeiw0/x/",
+        }]
+        assert out["comment_insights"] == [] or isinstance(out["comment_insights"], list)
+        assert out["num_comments"] is None  # archive rows carry no post total
+        arctic.assert_called_once_with(
+            "1taeiw0", limit=rs.MAX_COMMENTS, skip_author=rs._is_bot_author,
+            deadline=123.0)
+
+    def test_shreddit_results_skip_arctic(self):
+        with mock.patch.object(rs.http, "get_text", return_value=_html()), \
+             mock.patch.object(rs.reddit_arctic, "fetch_post_comments") as arctic:
+            out = rs.fetch_comments(self.URL)
+        assert out["top_comments"]  # shreddit parse results
+        assert out["num_comments"] == 14
+        arctic.assert_not_called()
+
+    def test_both_empty_returns_empty(self):
+        with mock.patch.object(rs.http, "get_text", return_value=None), \
+             mock.patch.object(rs.reddit_arctic, "fetch_post_comments", return_value=[]):
+            out = rs.fetch_comments(self.URL)
+        assert out["top_comments"] == [] and out["num_comments"] is None
+
+    def test_both_empty_keeps_shreddit_total(self):
+        html = '<shreddit-comment-tree-stats total-comments="37"></shreddit-comment-tree-stats>'
+        with mock.patch.object(rs.http, "get_text", return_value=html), \
+             mock.patch.object(rs.reddit_arctic, "fetch_post_comments", return_value=[]):
+            out = rs.fetch_comments(self.URL)
+        assert out["top_comments"] == [] and out["num_comments"] == 37
+
+    def test_never_raises_when_arctic_fails(self):
+        with mock.patch.object(rs.http, "get_text", return_value=None), \
+             mock.patch.object(rs.reddit_arctic, "fetch_post_comments",
+                               side_effect=Exception("boom")):
+            out = rs.fetch_comments(self.URL)
+        assert out["top_comments"] == [] and out["num_comments"] is None

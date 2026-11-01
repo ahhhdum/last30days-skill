@@ -9,6 +9,254 @@ This project uses [towncrier](https://towncrier.readthedocs.io/). Upcoming notes
 
 <!-- towncrier release notes start -->
 
+## [3.31.0] - 2026-10-27
+
+### Security
+
+- Fixed MCP research dispatch so reserved topic names cannot invoke administrative commands. Protected existing password-store credentials when decryption fails, and sanitized Digg-attached X quotes so external content cannot forge the engine's evidence boundaries.
+
+### Added
+
+- Browser-cookie auth now covers **Dia** (The Browser Company) on macOS, alongside the rest of the Chromium family. Use `FROM_BROWSER=dia`, or let `FROM_BROWSER=auto` find it. The first-run setup wizard also scans Dia, so a user whose only X session lives there is detected without setting `FROM_BROWSER` first.
+- Reddit comment enrichment now falls back to the arctic-shift archive when the shreddit comment partials return nothing — hosts on datacenter egress (where Reddit 403s `/svc/shreddit`) keep top-comment text (ranked by score) instead of silently degrading to counts only.
+
+### Fixed
+
+- Preserve explicit person identity anchors through plan replay, X entity expansion, and ranking so same-name evidence cannot become a supplemental target or ranked result. ([#1290](https://github.com/mvanhorn/last30days-skill/issues/1290))
+- TikTok searches now share a deadline across hashtags, creator videos, keyword searches, transcripts, and comments, returning collected videos as partial results instead of losing them at the stream timeout. ([#1311](https://github.com/mvanhorn/last30days-skill/issues/1311))
+- When the YouTube step times out, the footer now names the timeout instead of telling you to update yt-dlp. ([#1327](https://github.com/mvanhorn/last30days-skill/issues/1327))
+- YouTube no longer times out for every entity in "X vs Y vs Z" comparisons. Each entity now takes its share of a single-topic YouTube budget (searches, transcripts, and comments, at least one of each) instead of a full budget apiece, so the parallel sub-runs stop queueing several runs' worth of yt-dlp work on the shared two-slot limit and each one returns videos inside the 180-second lane wait. Single-topic runs are unchanged. ([#1335](https://github.com/mvanhorn/last30days-skill/issues/1335))
+- A YouTube lane that runs out of time now returns the videos it already found instead of being dropped as a timeout with zero results. Search, transcript, and comment fallbacks share the lane's return deadline, preserving time to hand back partial results. Expired lanes are not retried or backfilled, and no new paid fallback starts after their return deadline.
+- Classify ScrapeCreators Instagram reels-search 404 responses that explicitly report no matching reels as clean no-results, while preserving errors for other 404s and keeping Google discovery fallback. When the hashtag-form retry answers a reels-search 500, the replaced 500 no longer marks Instagram as failed. Fixes the Instagram portion of #1311.
+- Fixed cached HTML exports to respect research scope and support comparison exports after temporary plans are removed. Aligned MCP save destinations with preflight and trusted configuration, isolated comparison peers' dedicated subreddits, and honored jobs exclusions throughout source selection.
+
+  Kept rejected Polymarket markets out of ranking, restored enrichment-based entity grounding, selected the newest relevant freshness assertion, included the final requested day in Grok and Xquik searches, and restored Reddit fallback when ScrapeCreators results are all outside the requested window. Corrected non-Latin web-backend guidance and autoresolve backend availability.
+
+  Fixed signup credential persistence over empty configuration assignments, browser cookie snapshots with committed SQLite WAL changes, multipart Trustpilot hostnames, and Startpage snippet association. Preserved maximum observed engagement during concurrent updates.
+- GitHub source footers distinguish open issues/PRs, total PRs, and contributed PRs from discussion comments across compact, HTML, and comparison views. Genuine issue and PR comment counts remain discussion comments.
+- Grok X research works again on current grok CLI releases. Instead of accepting only grok 1.0.46, last30days accepts stable builds at 1.0.46 or newer and audits each new build once, locally, before it receives credentials: the build runs against a fake xAI endpoint on 127.0.0.1 with dummy credentials, signed in and with an API key, must declare hosted X search as its only tool, and must refuse a forced shell command and file read. The audit costs no credits and never contacts xAI. npm installs now run the native binary the package ships, which also skips a roughly 170 MB decompression on every grok call.
+- Keyless web results (DuckDuckGo, Startpage, SearXNG) no longer vanish because they carry no date: when the research window reaches today, undated keyless results are kept and labelled `date unknown [date:low]`. Historical windows still drop them, and keyed backends keep their existing date rules. Follow-up to #928 / #1038.
+- Reddit comment enrichment now stops the arctic-shift archive fallback at the shared enrichment budget instead of giving it a fresh 15 seconds, so a slow archive on a datacenter host can no longer hold up the rest of the research past that budget.
+- YouTube spends fewer ScrapeCreators credits on transcripts. Paid rescues of failed yt-dlp transcript fetches stop once they have filled the depth's transcript target instead of covering every candidate (up to three times the target). The search backfill counts transcripts yt-dlp already fetched toward that target. yt-dlp now requests every original-speech track (`en-orig`, `es-orig`, ...) before any plain language code, so a video dubbed from another language into English no longer stops at a rate-limited translated `en` track before reaching its original.
+
+
+## [3.30.0] - 2026-10-22
+
+### Fixed
+
+- Hosted runs now search installed lanes such as Digg even when the host's plan leaves them out, and stop printing "0 clusters" for sources that were never searched. Entity runs resolve the subject's X handle more reliably: `--official-site` reads the handle from the brand's homepage links with no API key, the runbook restricts X searches with the search tool's domain filter, and a hosted entity run that plans X now exits 2 until it passes `--x-handle` or `--no-x-handle="<reason>"`.
+
+
+## [3.29.0] - 2026-10-22
+
+### Security
+
+- Add a "Data handling" section to README in all 7 languages disclosing that reranking sends topics and content snippets to the configured reasoning provider when a key is set. Document `LAST30DAYS_STORE` retention, save-directory overrides, and how to purge a database and its WAL sidecars after stopping all users. Log the npm package name to stderr before each `npx` install, preserving machine-readable stdout. These disclosure changes do not add a rerank-disable option, automatic expiry, or a new installation-consent gate. ([#663](https://github.com/mvanhorn/last30days-skill/issues/663))
+
+### Added
+
+- `LAST30DAYS_YOUTUBE_BACKEND=yt-dlp` keeps YouTube on yt-dlp only, with the keyless retry budget, while `SCRAPECREATORS_API_KEY` keeps serving other sources. `LAST30DAYS_YT_TRANSCRIPT_FAST_ATTEMPTS` sets how many keyed yt-dlp transcript attempts run before the paid fallback (default 1). ([#1316](https://github.com/mvanhorn/last30days-skill/issues/1316))
+
+### Fixed
+
+- Instagram keyword search falls back to a bounded Google-indexed reel search and fetches post details when the primary reels search returns no results. Recovery and enrichment share the source deadline, preserve completed results as partial coverage, and stop starting requests after timeout or cancellation. ([#1020](https://github.com/mvanhorn/last30days-skill/issues/1020))
+- Instagram nudge now distinguishes HTTP errors ("Bonus source failed: Instagram") from zero-result runs ("Bonus source unavailable: Instagram") instead of labelling both as "silent". ([#1289](https://github.com/mvanhorn/last30days-skill/issues/1289))
+- Updated the README source tables in all seven languages to include the engine's optional and local sources, with activation requirements. Replaced stale release and test counts with maintained references, and corrected source prerequisites in CONFIGURATION.md. ([#1303](https://github.com/mvanhorn/last30days-skill/issues/1303))
+- YouTube transcripts now request uploaded subtitles alongside auto captions, so videos with manual subtitles and no auto track get a free yt-dlp transcript instead of falling through to a paid ScrapeCreators rescue. ([#1313](https://github.com/mvanhorn/last30days-skill/issues/1313))
+- yt-dlp now asks for each caption language's original-speech track first (`en-orig,en,...`), so auto-dubbed videos whose plain track returns HTTP 429 keep a free transcript. The ScrapeCreators fallback sends plain language codes. ([#1314](https://github.com/mvanhorn/last30days-skill/issues/1314))
+- A YouTube lane still running after the research budget ran out no longer spends ScrapeCreators credits on search, transcripts, or comments, and an interpreter-shutdown error is no longer treated as an empty yt-dlp result. The ScrapeCreators YouTube search also stops buying transcripts once it reaches the depth's target. ([#1315](https://github.com/mvanhorn/last30days-skill/issues/1315))
+- Digg results work again with digg-pp-cli 2026.10.1, which rebuilt search after Digg removed its search API. last30days now searches Digg's AI and Tech sections, keeps an empty answer from a freshly synced copy as "no matches" instead of an error, and marks Digg partial in the brief, with the `digg-pp-cli sync --topics ai,tech` command to run, when the CLI searched only its newest stories.
+- Handle discovery no longer treats short fragments of a topic word (for example "go" for "Google Gemini") as the topic's subject, now recognizes handles spelled from a name's prefixes (for example "steipete" for "Peter Steinberger"), and no longer gives first-party status to accounts named after query scaffolding words like "review" or "news".
+- Keyless Reddit discovery no longer collapses to 1-point stubs when shreddit is blocked: the arctic-shift supplement now slices the research window with `after`/`before` and keeps the highest-scored sampled posts, restoring real engagement numbers (a 30-day window on the test topic went from 6pts to ~3,000pts). Slice requests rotate across subreddits so a slow first subreddit cannot consume the entire discovery budget, and successful partial results survive failed slices or an expired deadline.
+- Search-query cleanup now strips "how do you use", "how can I use", "how do you" and "how can I" openers, so "how do you use Cursor" searches for "cursor" instead of "do you cursor".
+- The deferred X relevance floor now runs before the per-source evidence view is finalized, so the report's X items and X source status count reflect the same post-floor evidence set that ranking sees.
+
+
+## [3.28.1] - 2026-10-20
+
+### Added
+
+- Add `YOUTUBE_PROXY` (alias `YT_PROXY`) env var: when set, passes `--proxy <url>` to all yt-dlp invocations in `youtube_yt.py` (`search_youtube` and `fetch_transcript`), routing only yt-dlp traffic through the proxy. Useful in regions where YouTube is blocked. Documented in CONFIGURATION.md under "YouTube proxy". ([#158](https://github.com/mvanhorn/last30days-skill/issues/158))
+
+### Fixed
+
+- Render the engine footer as a fenced text block so Markdown does not turn `---` into horizontal rules. ([#706](https://github.com/mvanhorn/last30days-skill/issues/706))
+- GitHub searches skip qualifier-only topics with malformed or nested wrappers instead of sending punctuation-only queries. Topics containing real search text keep their existing punctuation. ([#969](https://github.com/mvanhorn/last30days-skill/issues/969))
+- Authenticated Bluesky searches now send RFC3339 date-time bounds, preventing valid date windows from being rejected as malformed requests. ([#984](https://github.com/mvanhorn/last30days-skill/issues/984))
+- Remove "LAW N" framing from model-visible render output: the SYNTHESIS CONTRACT, EVIDENCE FOR SYNTHESIS envelope, and DEGRADED RUN WARNING now use plain descriptive guidance instead of numbered law references. ([#1082](https://github.com/mvanhorn/last30days-skill/issues/1082))
+- The MCP launcher now finds and verifies Python 3.12+ interpreters on PATH when the default python3 is too old. Set LAST30DAYS_PYTHON to select a specific interpreter; invalid explicit choices report an error instead of silently falling back. ([#1140](https://github.com/mvanhorn/last30days-skill/issues/1140))
+- xAI: change the default model from `grok-4-1-fast`, which xAI no longer lists, to `grok-4.20-0309-non-reasoning`. The same default (`XAI_DEFAULT`) drives the xAI X search backend and the xAI planner and rerank models when `LAST30DAYS_REASONING_PROVIDER=xai`, unless `LAST30DAYS_X_MODEL` or `LAST30DAYS_PLANNER_MODEL` / `LAST30DAYS_RERANK_MODEL` pin another model. `CONFIGURATION.md` now documents `LAST30DAYS_X_MODEL` next to `XAI_API_KEY`. ([#1186](https://github.com/mvanhorn/last30days-skill/issues/1186))
+- Reddit comment parsing now matches shreddit attribute names case-insensitively, so markup that carries `thingid` instead of `thingId` no longer yields zero comments. ([#1256](https://github.com/mvanhorn/last30days-skill/issues/1256))
+- Digg now reports an error instead of "no results" when `digg-pp-cli` falls back to its local store after a failed live search (last30days never runs `digg-pp-cli sync`, so the fallback store is always empty). ([#1281](https://github.com/mvanhorn/last30days-skill/issues/1281))
+- Hacker News top comments now follow the thread's display order from the official HN item API instead of Algolia's oldest-first order, so quoted comments are the ones HN ranks highest. If that lookup fails, comments keep the previous order and the Hacker News source is not marked degraded. ([#1285](https://github.com/mvanhorn/last30days-skill/issues/1285))
+- GitHub keyword searches now stop at the research window end, so an `--as-of` run no longer spends its result slots on issues created after the window and then drops them.
+- GitHub person mode (`--github-user`) now counts PRs created inside the research window only, so an `--as-of` run no longer reports every PR up to today, and its velocity summary names the real window length instead of always saying 30 days.
+- Live-edit setup guidance now preserves the installed skill as a backup before replacing its real directory with a working-tree symlink, so development edits reach the active skill.
+- Sources named in `--search` are no longer dropped by intent routing at default and deep depth (for example, Polymarket on a topic classified as a concept or how-to).
+- YouTube no longer keeps videos published after the end of an `--as-of` window, so a historical report cannot cite later videos or spend its transcript budget on them. Cached and concurrent searches use the complete date window, including its inclusive end date.
+- arXiv no longer returns papers published after the end of an `--as-of` window, and its one-year recency cutoff is now measured from that end date, so historical reports keep in-window papers instead of citing later ones.
+- dev.to now finds articles for research windows that end before today. It pages back through newer results within a 45-second budget, keeps only articles inside the window, and includes the whole first day of every window.
+
+
+## [3.28.0] - 2026-10-11
+
+### Security
+
+- Cached research reports and the GitHub sign-in handle are now written with owner-only permissions on macOS and Linux. Hosted research through `LAST30DAYS_API_BASE` now requires HTTPS, except for loopback addresses.
+
+### Added
+
+- Added a security policy (`SECURITY.md`) that explains how to report vulnerabilities privately through GitHub security advisories and documents what the skill sends over the network, which credentials and browser cookies it reads, what it installs, and what it stores locally. ([#565](https://github.com/mvanhorn/last30days-skill/issues/565))
+- Added dev.to as a free, keyless source. When you research a software or developer topic, the skill infers dev.to tags and adds dev.to articles ranked by reactions and comments, with top comments from the leading articles. It stays off for other topics, and `INCLUDE_SOURCES=devto` turns it on for every run.
+
+### Fixed
+
+- A host-supplied query plan now searches only the sources it names: company topics no longer get an unrequested jobs lane added to it. A plan that names jobs keeps jobs on any topic, and hiring-signals mode with a host plan runs the jobs lane instead of failing with "No available planned sources remain".
+- A multi-subquery run now fetches each identical TikTok, Instagram, YouTube, and X search once instead of once per subquery, and the thin-source retry reuses a clean result instead of repeating the request. Polymarket and Digg no longer run the same search twice when the thin-source retry's simplified query matches the planner's. Failed fetches are not reused, so the retry still makes a real second attempt.
+- Corrected the configuration reference to describe ScrapeCreators' GitHub device-code signup, TikTok and Instagram availability with a ScrapeCreators key, and the DuckDuckGo → Startpage → optional SearXNG search fallback. Removed the unsupported Apify fallback claim and documented YouTube SSH routing, including its prerequisites and limits.
+- Fixed `--github-repo` project mode silently dropping the pinned repo when its newest GitHub release is older than the research window (Ghostty's newest release object is a 2022 nightly). The repo snapshot is now dated to the window end unless that release falls inside the window, so the live star count reaches the report and Source Coverage no longer shows "GitHub: 0 items (no results)" after the engine logged a project-mode result. A snapshot dated this way ranks on neutral freshness (the 10-90 scale midpoint) instead of maximum freshness, so the pinned repo card no longer sorts to #1 in every report; a repo whose newest release is inside the window keeps normal freshness.
+- Fixed first-run setup to find signed-in Opera sessions on macOS when you approve browser-cookie access, before trying Firefox and Safari.
+- Fixed the engine footer printing "15 storys" for Hacker News; it now reads "15 stories" (and "1 story"). Footer nouns ending in a consonant followed by "y" now pluralize to "ies".
+- Hacker News comment quotes now link to the comment itself (or the HN discussion page when the comment id is missing) instead of the story's article URL.
+- Hacker News: when the same article was submitted to HN more than once, the engine merged the submissions and showed one story's id with another story's comment count and comments. Each HN submission now keeps its own points, comment count, discussion link, and comments, and a ranked card's evidence text comes from the same submission whose numbers it shows; submissions of the same article still cluster together.
+- Ranking without an LLM reranker now weighs real engagement: a 380-point Hacker News story no longer ranks below 3-point stories just because they are newer. Relevance is still judged by word overlap with the topic, so a well-upvoted post whose title barely matches can still rank below weaker posts that repeat the topic words. Engagement is scored on an absolute per-platform scale instead of within each search's own results, freshness is counted once, the low-score cliff applies only to LLM-scored results, and first-party posts are lifted only when they are on topic (or the handle is the topic itself). The "All Items" list now shows real scores instead of 0 or 1. GitHub repo cards no longer count lifetime stars as engagement or take first-party credit, and YouTube, TikTok, and Instagram engagement is scored on a view scale so a few-hundred-view video no longer rates like a well-upvoted thread.
+- Recent-topic reports no longer include years-old YouTube videos when nothing on YouTube falls inside the date window; the YouTube section now comes back empty instead of padding the report with off-topic back-catalog videos. Evergreen and how-to topics still fall back to older videos when recent ones are scarce.
+
+
+## [3.27.3] - 2026-10-11
+
+No significant changes.
+
+
+## [3.27.2] - 2026-10-09
+
+### Security
+
+- Provider endpoint overrides (`OPENAI_BASE_URL`, `XAI_BASE_URL`, `OPENROUTER_BASE_URL`) now reject remote cleartext `http://` targets and use the vendor endpoint instead. Rejection warnings omit the configured URL so embedded credentials cannot leak to stderr. Loopback `http://` overrides still work for local gateways (LiteLLM, Ollama, SSH tunnels) and bypass configured HTTP proxies so the bearer token stays on the local connection. `--preflight` already listed all three override keys; it now marks rejected values as ignored rather than active and reports only the variable names.
+
+### Added
+
+- Agent JSON exports now include token usage from the full planner and rerank run for Gemini, OpenAI, xAI, and OpenRouter. Usage is `null` when a provider omits token counts or a request has unknown usage, so callers do not mistake missing data for zero cost. ([#1137](https://github.com/mvanhorn/last30days-skill/issues/1137))
+
+### Changed
+
+- Under a detected agent host (Claude Code, Codex, `LAST30DAYS_HOST`, or `LAST30DAYS_HOST_AGENT=1`), a research run without `--plan` now stops with exit 2 and a LAW 7 message before any retrieval or internal-planner spend, instead of silently planning with an engine-side provider. `--mock`, `--hiring-signals`, `--auto-resolve`, comparison runs and non-research commands are exempt, and `LAST30DAYS_ALLOW_ENGINE_PLAN=1` restores engine planning for headless runs under an agent. Outside an agent host, a failed internal planner (for example HTTP 402) now also prints the LAW 7 reminder. ([#1178](https://github.com/mvanhorn/last30days-skill/issues/1178))
+
+### Fixed
+
+- Added regression tests for issue #817: Arabic-script (and other non-Latin) topics no longer risk UnicodeEncodeError on TikTok and Instagram (ScrapeCreators) searches. Tests lock in the existing percent-encoding fix in `http.request()` and cover the TikTok and Instagram search paths end-to-end. ([#817](https://github.com/mvanhorn/last30days-skill/issues/817))
+- Fixed Windows Bird/X timeouts that left Node shim descendants running after the shim or intermediate processes exited. ([#823](https://github.com/mvanhorn/last30days-skill/issues/823))
+- Brave, Exa, and Serper web results with unknown dates now survive the research pipeline when the provider bounds the requested window. Parallel applies a provider start-date filter and keeps undated results for current-window searches. Unknown dates remain labeled as such. ([#928](https://github.com/mvanhorn/last30days-skill/issues/928))
+- Fixed Reddit discovery reporting blocked or cardless r/all listings as no results instead of a degraded source. ([#940](https://github.com/mvanhorn/last30days-skill/issues/940))
+- Backfill thin YouTube search results from ScrapeCreators when a key is set, retain yt-dlp videos and transcripts, and surface backfill and failure details. Set `LAST30DAYS_YT_SC_MIN_ITEMS=0` for empty-only fallback. ([#977](https://github.com/mvanhorn/last30days-skill/issues/977))
+- The ScrapeCreators YouTube transcript fallback now requests up to three distinct preferred caption languages in order (`LAST30DAYS_YT_SUB_LANGS`, default `en,es,pt`). It skips empty tracks and limits total fallback time to 30 seconds per video. ([#1169](https://github.com/mvanhorn/last30days-skill/issues/1169))
+- X search through `xurl` no longer fails with "xurl: search failed" when a topic contains a bare `and`/`or`: the topic is sanitized into plain keywords (operators, negation, grouping and quotes removed, capped at 512 characters) before it reaches the X API, and an X "Invalid Request" rejection is now reported as "xurl: X rejected the query (invalid request)". ([#1177](https://github.com/mvanhorn/last30days-skill/issues/1177))
+- X search failures attributed to the xAI backend now point to its credentials, billing, rate limit, or timeout remedy instead of browser login or an unrelated X API bearer. ([#1186](https://github.com/mvanhorn/last30days-skill/issues/1186))
+- Setup and research runs now explain when browser-data permission denial prevents X cookie authentication. Doctor shows the last setup denial without reading browser cookies and points to manual cookies or key-backed X access. ([#1193](https://github.com/mvanhorn/last30days-skill/issues/1193))
+- A failed yt-dlp YouTube search (network error, bot check, broken install) is now reported as a YouTube failure in Source Coverage instead of as "no results".
+- Reports no longer end with a trailing `Sources:` list. Host web searches now run in a subagent, so the main agent never receives the web-search tool's "include sources" reminder. Web pages are cited inline and counted in the closing "I have all the links" line. The engine's end-of-output text no longer claims to override tool contracts.
+- The research runbook passes literal topics containing apostrophes or backticks correctly on macOS Bash 3.2, while retaining zsh compatibility and preventing shell expansion.
+
+
+## [3.27.1] - 2026-10-08
+
+### Fixed
+
+- On Grok Bot, the month's most-engaged on-topic X posts now reach the report: a host-fetched X stream holds half its slots for its most-engaged posts that name the topic, so the popular pass's big posts no longer lose to fresher low-engagement ones, and off-topic viral posts never take those slots. The footer's X line now names its source ("via Grok Bot X" or "via X connector"), and the Grok Bot X recipe gives discovered authors only topic-word lanes and uses the engine's UTC date for the window.
+
+
+## [3.27.0] - 2026-10-08
+
+### Security
+
+- Route `github.py` and `transcribe.py` through `http.open_request` so their bearer tokens are also dropped on cross-origin redirects; both built their own Request and called `urllib.request.urlopen` directly, bypassing the handler added for #1062. ([#1062](https://github.com/mvanhorn/last30days-skill/issues/1062))
+- Restricted Grok X research to an agent profile with no local tools or default tool injection, while retaining hosted X search. Only the audited Grok 1.0.46 stable build (2765805b9442) runs; other builds fail before credentials are staged. Search topics now enter the prompt as single-line JSON string literals, so quotes, backslashes, newlines, and invisible Unicode cannot break the prompt's framing. The model can still misinterpret a topic or report inaccurate results; escaping does not make model output trustworthy. ([#1161](https://github.com/mvanhorn/last30days-skill/issues/1161))
+- Prevented private corpus titles from appearing in published library briefs, indexes, and feeds. Daily briefing archives now retain headline provenance; library headlines use public findings from daily and weekly archives or a generic headline when provenance is unavailable. Original titles remain available locally.
+- Require explicit consent before reading browser cookies through Chrome debugging sessions. Setup now saves acceptance or refusal, and a saved refusal blocks native browser and CDP reads on subsequent runs without storing cookie values.
+
+### Added
+
+- Document previously-undocumented engine flags in SKILL.md; add CLI-flag and engine-sync contract tests.
+
+### Changed
+
+- Load last30days instructions by research stage and optional mode, keeping the skill entry point short and preserving onboarding, output, citation, and permission requirements. Remove conflicting recommendation and comparison recipes and align plan guidance with the existing engine contract. ([#1230](https://github.com/mvanhorn/last30days-skill/issues/1230))
+- On Grok Bot, X now works out of the box: the bot fetches X through its built-in X tools first, with no plugin, key, or X API credits needed, then falls back to the X for Grok Bot connector and the official X API keys. Busy topics also get a popular pass, one relevance-sorted page for each of 10 equal slices of the window (5 on `--quick`), so the month's most-engaged posts surface, and the footer reads "via Grok Bot X". Host-fetched X results (`--x-posts`) can now fill the same topic budget as the engine's own two X fetches (24 posts at default depth, up from 12).
+
+### Fixed
+
+- `.env` lines written with the shell's `export` prefix (`export KEY=value`) now set `KEY`; before, they created a key literally named `export KEY` and the setting was silently ignored. The setup wizard also treats an `export KEY=...` line as the key being set, so it no longer appends a second copy. ([#930](https://github.com/mvanhorn/last30days-skill/issues/930))
+- Hacker News stories now get their top comments attached again: the pipeline calls `hackernews.enrich_top_stories` after parsing search results, so HN items no longer reach normalization with empty `top_comments`. ([#1168](https://github.com/mvanhorn/last30days-skill/issues/1168))
+- SKILL.md now consistently documents the `--plan` tmpfile form (`--plan "$QUERY_PLAN_FILE"`) in the pre-run checklist and post-run self-check, matching LAW 7; the inline `--plan 'QUERY_PLAN_JSON'` form no longer appears in those spots. ([#1196](https://github.com/mvanhorn/last30days-skill/issues/1196))
+- SKILL.md's privacy list now notes the TikTok legacy fallback: when `SCRAPECREATORS_API_KEY` is unset, `APIFY_API_TOKEN` is sent to ScrapeCreators. ([#1197](https://github.com/mvanhorn/last30days-skill/issues/1197))
+- Reject YouTube SSH host aliases beginning with a dash while preserving valid aliases and SSH option termination.
+
+  The manual engine comparison tool now uses the canonical engine path, counts nested entity reports, reports command failures separately from source errors, and exits unsuccessfully for failed or partial comparisons, including failures retained only in source status. ([#1226](https://github.com/mvanhorn/last30days-skill/issues/1226))
+- A failed X handle lane is no longer reported as "the subject posted nothing". The bird and xquik FROM/ABOUT lanes signalled a per-handle failure by returning no items, and the pipeline hardcoded the auth flag to `False` for both backends, so a missing `node`, a bird-search timeout, or an unpaid xquik key produced an empty lane with no recorded outcome — indistinguishable from genuine silence. Both adapters now report the reason, the pipeline records it, and the lane's auth message names the backend that actually failed.
+- Bound MCP output-pipe draining after engine shutdown so detached helpers cannot delay timeout responses indefinitely. Canceled and timed-out requests now report their context error even when the engine's signal handler exits successfully, and requests canceled before startup do not launch the engine.
+- Bound X searches, source waits, and discovery enrichment with shared deadlines. Cancelled enrichment stops later supplemental searches, X retries, and pipeline provider phases; completed evidence survives source timeouts as partial results. Bird searches that complete empty before the budget blocks optional retries retain their no-results status and show a partial-coverage warning. In-flight subprocesses retain their bounded timeouts. Raised the MCP subprocess timeout to 600 seconds (10 minutes) to accommodate deep enrichment; `LAST30DAYS_MCP_TIMEOUT` overrides it. The longer cap also lets a hung subprocess occupy an MCP slot longer.
+- Browser cookie detection now requires the complete login pair before accepting a source, so a logged-out session can no longer shadow the browser where you are actually logged in.
+- Discovery enrichment now hands each sub-run worker its own config copy, so one topic's financial-topic flag can no longer overwrite another's mid-run.
+- Doctor source probes and Reddit comment enrichment now stop stalled HTTP reads within their operation budgets and reap the transport workers. Reddit keeps comments that completed in time, and a zero enrichment budget starts no requests.
+
+  GET worker launch failures no longer leave unknown API-spend records for requests that were never delivered.
+
+  Doctor preserves completed Reddit HTTP 429 responses as unverified when the remaining probe budget cannot fit a retry.
+- Fixed browser selections being lost after consented setup, including Chromium and services signed in through different browsers, so later research can reuse their sessions without saving cookie values.
+  Both onboarding flows now explain future browser reads before consent, possible repeated macOS Keychain prompts, and how to disable native browser and CDP access.
+- Fixed the runtime preflight failing with "requires Python 3.12+" when `/last30days` is invoked in Claude Code with a multi-word topic: positional parameters in the `SKILL.md` preflight are now written as `${1}` / `$(2)`, which Claude Code's `$<digit>` argument substitution leaves alone.
+- Fixed watchlist daily budgets to accumulate provider-reported OpenRouter and Perplexity USD charges, preserve spending after failed or timed-out runs, and stop subsequent topics when the budget is exhausted or paid usage has unknown cost.
+- Fixed watchlist topic removal to preserve findings and run history shared with other topics. Topic lists, finding queries, trend counts, and briefings now include shared findings without double-counting repeated sightings, using each topic's first sighting for reporting windows.
+- HTML export and optional publishing commands now locate the engine through the skill's established `SKILL_DIR`, including installation paths containing spaces.
+- Honor configured memory directories in skill research, library, and topic-queue commands, preserve explicit empty values, fall through unresolved host placeholders to lower-priority configuration, and reuse the resolved directory throughout discovery. Only claim a saved artifact when the engine emitted its path.
+- Honor the research end date in Bird X searches, including query retries, author timelines, and mentions, so newer posts cannot crowd out historical results.
+- Honor the research plan's source selection for supplemental X handle searches and host-fetched X posts, preventing excluded X sources from returning evidence or making extra backend requests.
+- Include the research persistence module in MCP bundles so enabling `LAST30DAYS_STORE` saves findings without failing before results are returned.
+- Keep slash-containing research topics such as `CI/CD`, repository names, and URLs intact instead of launching unintended competitor comparisons. Preserve supported comparison forms, including `React/Vue/Svelte`, and slashes inside explicitly compared entities.
+- MCP research tool now separates the topic from engine flags and no longer saves a report after an explicit decline.
+- On POSIX systems, MCP timeouts now terminate descendant processes (X search, YouTube/transcript, Digg helpers) instead of leaving them orphaned and running after the engine is killed. Per-source timeouts also stop helpers whose parent exits before them.
+- Paid Reddit search preserves the requested date range at every research depth, including historical windows.
+- Preserve discovery sweep coverage warnings through saved nomination bundles, resumed research, and final reports, including empty results. Older nomination bundles continue to load.
+- Preserve existing HTML briefs across repeated or concurrent exports, and publish a new local artifact only after rendering succeeds.
+- Preserve job-board roles through author diversity filtering and calculate hiring signals from the complete accepted board, so ranking and display limits do not hide strategic roles or understate company size.
+- Prevent competitor research from inheriting the main topic's resolved context when the competitor has no context of its own.
+- Prevent concurrent MCP server startups from replacing a complete engine cache with a partial extraction. Each process now stages its own files, bounds publication-lock waits to five seconds, and safely reclaims staging files left by terminated extractors.
+- Respect host, tool, and user citation requirements in research summaries while retaining the default footer and saved research appendix where compatible.
+- Saving research preserves an existing watchlist topic's custom queries and schedule.
+- Search-quality evaluations now reuse cached judgments only when the judge model and complete prompt match, so changed results, topics, or grading instructions receive fresh scores. Older caches are refreshed before reuse.
+- The `serper` web backend no longer discards every recent result. Google renders a relative date ("2 hours ago", "1 day ago") for fresh results, which the date parser did not understand, so the in-range check dropped them — the newer the result, the more likely it was thrown away. On a one-day research window the web lane came back empty every time, reported as `Web: 0 items (no results)` rather than as a failure. Relative dates now resolve against the query date, which is what the label states an age relative to, so a `--as-of` search of a past window keeps the results that belong to it. A sub-day label is subtracted from the clock rather than rounded up to the current date, so shortly after midnight "23 hours ago" still names yesterday, and an age too large to represent reads as an unparseable date instead of aborting the rest of the results. The `brave` and `exa` backends were unaffected, since they return ISO timestamps.
+- The changelog guard now compares files and lockstep versions from the same merge base resolved at job time. This avoids attributing base-branch releases to a pull request when its event contains an older base SHA or its branch has not yet incorporated the latest release.
+- The fun judge now reads normalized comment excerpts and their vote counts from YouTube, TikTok, and Instagram, while preserving legacy comment bodies and comment insights.
+- Tightened source failure classification: 429/5xx status matching no longer false-positives on embedded digits, the stream exception path keeps the most specific failure (auth over rate-limit), X URLs keep path/query case when deduping, and an unconfigured X backend reads as skipped rather than failed.
+- `XAI_BASE_URL` and `OPENROUTER_BASE_URL` now also redirect the X search (`x_search`) and the OpenRouter Sonar fallback, not only the planner and rerank client, so a gateway or proxy sees every request that carries those keys. `--preflight` now lists `OPENROUTER_BASE_URL` among the active endpoint overrides.
+
+
+## [3.26.0] - 2026-10-01
+
+### Security
+
+- `--save-suffix` is sanitized to a path-safe token so traversal fragments cannot escape the save directory (including discover-mode saves). ([#736](https://github.com/mvanhorn/last30days-skill/issues/736))
+
+### Removed
+
+- Keyless Reddit discovery no longer uses Reddit RSS feeds, which Reddit shuts off on 2026-11-13.
+
+### Added
+
+- Keyless Reddit discovery now uses Reddit's own site search, alongside subreddit listings, arctic-shift, and shreddit comments, so Reddit keeps working with no API key after the RSS shutdown.
+- New `--perplexity-search-type fast|web` flag and `LAST30DAYS_PERPLEXITY_SEARCH_TYPE` setting choose the search type for direct Perplexity Search API and Agent `web_search` requests. They do not enable the Perplexity source and need a direct `PERPLEXITY_API_KEY`. Thanks to @sk-holmes (#1184).
+- The local MCP server can now use an explicit `LAST30DAYS_PYTHON` interpreter and a default-deny, consent-gated `LAST30DAYS_MCP_ALLOW_BROWSER_COOKIES` switch, enabling reproducible Windows Claude Desktop deployments without weakening the existing cookie-access default.
+
+### Changed
+
+- With `SCRAPECREATORS_API_KEY` set, Reddit now spends ScrapeCreators credits to backfill search whenever the free path returns fewer than 5 items, instead of only when it returns nothing. A run makes at most one ScrapeCreators Reddit backfill per distinct query, date window, and subreddit set, and each backfill is several API calls (searches plus comment fetches, roughly 10 at default depth). Set `LAST30DAYS_REDDIT_SC_MIN_ITEMS=0` to restore the old backfill-only-when-empty behavior.
+
+### Fixed
+
+- `--perplexity-search-type` no longer moves hosted-backend runs to local research when no direct `PERPLEXITY_API_KEY` is configured, and an invalid `LAST30DAYS_PERPLEXITY_SEARCH_TYPE` value no longer blocks OpenRouter Sonar searches. ([#1188](https://github.com/mvanhorn/last30days-skill/issues/1188))
+- Reading an HTTP error response body now counts against the caller's deadline instead of stalling past it, and debug logs redact request API keys, including keys a provider echoes back in an error body. Thanks to @sk-holmes (#1184).
+
+
 ## [3.25.0] - 2026-09-18
 
 ### Security

@@ -8,7 +8,11 @@ that silently loses the subject's own posts, and no prior test exercised it --
 existing supplement-lane tests use single-item batches that trip the rescue.
 """
 
-from lib import schema, signals
+from unittest.mock import patch
+
+import pytest
+
+from lib import pipeline, schema, signals
 
 
 def _x_item(item_id: str, author: str, relevance: float, engagement: dict | None = None):
@@ -193,29 +197,31 @@ def test_non_first_party_demotion_survives_the_floor_pass():
 
 # --- Phase 1 / quick-depth wiring (Greptile) --------------------------------
 
-def test_phase_one_normalize_receives_the_explicit_handles():
-    """Quick runs skip Phase 2 entirely, so an exemption reaching only the
-    supplement path leaves quick-depth reports discarding the subject's posts."""
-    import inspect
-    from lib import pipeline
-    src = inspect.getsource(pipeline.run)
-    assert "explicit_first_party = {" in src, (
-        "the user-named handles must be resolved before retrieval, not after"
-    )
-    assert "first_party_handles=explicit_first_party," in src, (
-        "the Phase 1 per-source normalize must receive the exemption"
-    )
-
-
-def test_explicit_handles_are_available_before_any_retrieval():
-    """The entity-extracted set does not exist until Phase 2; the explicit one
-    must be built from run()'s own arguments so Phase 1 can use it."""
-    import inspect
-    from lib import pipeline
-    src = inspect.getsource(pipeline.run)
-    build_at = src.index("explicit_first_party = {")
-    first_use = src.index("first_party_handles=explicit_first_party,")
-    assert build_at < first_use
+@pytest.mark.parametrize("handle_in_topic", [False, True])
+def test_pipeline_deferred_floor_keeps_subject_and_prunes_unrelated_account(handle_in_topic):
+    topic = "@steipete research" if handle_in_topic else "Peter Steinberger research"
+    raw = [
+        {"id": "subject", "author_handle": "steipete", "text": "Shipped another update",
+         "url": "https://x.com/steipete/status/1", "date": "2026-03-15",
+         "engagement": {"likes": 50}},
+        {"id": "noise", "author_handle": "rando_acct", "text": "Banana bread recipe",
+         "url": "https://x.com/rando_acct/status/2", "date": "2026-03-15",
+         "engagement": {"likes": 50}},
+        {"id": "relevant", "author_handle": "observer", "text": f"{topic} evaluation results",
+         "url": "https://x.com/observer/status/3", "date": "2026-03-15",
+         "engagement": {"likes": 50}},
+    ]
+    with patch.object(pipeline, "_retrieve_stream", return_value=(raw, {})), \
+         patch.object(pipeline, "weighted_rrf", wraps=pipeline.weighted_rrf) as fuse:
+        report = pipeline.run(
+            topic=topic, x_handle=None if handle_in_topic else "steipete",
+            config={}, depth="quick", mock=True, requested_sources=["x"],
+            web_backend="none", as_of_date="2026-03-31",
+        )
+    streams = fuse.call_args.args[0]
+    assert {item.item_id for stream in streams.values() for item in stream} == {"subject", "relevant"}
+    assert {item.item_id for candidate in report.ranked_candidates
+            for item in candidate.source_items} == {"subject", "relevant"}
 
 
 def test_related_handles_lane_gets_the_exemption():
@@ -249,6 +255,16 @@ def test_topic_candidates_exclude_stopwords():
     from lib import pipeline
     got = pipeline._topic_first_party_candidates("the best of the year")
     assert "the" not in got and "of" not in got
+
+
+def test_topic_candidates_exclude_query_scaffolding_words():
+    """Words like "review" or "news" describe the search, not the subject, so an
+    account that happens to be named after one must not get first-party status
+    (rerank._handle_is_topic already excludes the same words)."""
+    from lib import pipeline
+    got = pipeline._topic_first_party_candidates("Cursor review latest news")
+    assert "cursor" in got
+    assert not {"review", "latest", "news"} & got
 
 
 def test_topic_candidates_do_not_exempt_unrelated_authors():
@@ -370,6 +386,65 @@ def test_deferred_prune_runs_after_resolution_and_before_fusion():
     assert resolve_at < prune_at < fuse_at, (
         "the deferred floor must see resolved handles and still run before fusion"
     )
+
+
+def test_deferred_prune_reaches_the_report_not_just_fusion():
+    """The floor must run before the per-source view is finalized. Pruning only
+    the fusion streams left report.items_by_source and the X source_status
+    count describing the pre-floor pool."""
+    from unittest.mock import patch
+
+    from lib import dates, pipeline
+
+    day = dates.get_date_range(2)[0]
+
+    def _raw(item_id, author, text, likes):
+        return {
+            "id": item_id,
+            "text": text,
+            "url": f"https://x.com/{author}/status/{item_id}",
+            "author_handle": author,
+            "date": day,
+            "engagement": {"likes": likes, "reposts": 0, "replies": 0, "quotes": 0},
+            "relevance": 0.5,
+            "why_relevant": "test",
+        }
+
+    raw_items = [
+        _raw("1", "steipete", "unrelated lunch photo", 500),
+        _raw("2", "dev_a", "agent loops are great, agent loops everywhere", 300),
+        _raw("3", "dev_b", "agent loops need better evals", 200),
+        _raw("4", "spam_acct", "buy cheap watches now", 0),
+    ]
+    plan = {
+        "intent": "general",
+        "freshness_mode": "balanced_recent",
+        "cluster_mode": "story",
+        "subqueries": [
+            {
+                "label": "primary",
+                "search_query": "agent loops",
+                "ranking_query": "agent loops",
+                "sources": ["x"],
+            }
+        ],
+        "source_weights": {"x": 1.0},
+    }
+    with patch("lib.pipeline._retrieve_stream_impl", return_value=(raw_items, {})):
+        report = pipeline.run(
+            topic="agent loops",
+            config={},
+            depth="quick",
+            requested_sources=["x"],
+            mock=True,
+            x_handle="steipete",
+            external_plan=plan,
+        )
+
+    authors = {item.author for item in report.items_by_source["x"]}
+    assert "steipete" in authors, "first-party post must survive the floor"
+    assert "spam_acct" not in authors, "the floor must reach the report's per-source view"
+    assert report.source_status["x"].items_returned == len(report.items_by_source["x"])
 
 
 def test_non_x_sources_still_prune_in_place():
