@@ -42,7 +42,7 @@ The fused unit of evidence that ranking, clustering, and rendering operate on: e
 
 ### Keyless path
 
-The research flow available with no API keys: source data is gathered by scraping and RSS rather than authenticated APIs, and ranking falls back to local scoring instead of LLM-based reranking. This is the free tier of the Skill; lexical quality safeguards like Entity grounding matter most here, because no LLM is available to judge relevance semantically.
+The research flow available with no API keys: source data is gathered by scraping public web pages rather than authenticated APIs, and ranking falls back to local scoring instead of LLM-based reranking. This is the free tier of the Skill; lexical quality safeguards like Entity grounding matter most here, because no LLM is available to judge relevance semantically.
 
 ### Comment-enrichment slots
 
@@ -113,6 +113,12 @@ The host-conditional X routing rule that applies when the Harness identifies its
 ### Host-fetched lane
 
 An X result the hosting model fetched itself, through its own X connector, and handed to the Engine as a file (the X connector envelope, passed with `--x-posts`), which then serves as the run's X source in place of the X backend chain. The envelope is strict at the top level (a malformed, stale, or off-topic file fails closed), lenient per row (a bad row is dropped and counted), and trusted for nothing beyond a numeric post id and a grammar-valid handle: citations are rebuilt by the Engine, never copied from the file. It is single-serve (one run, consumed once) and accepted on any host; a session-level lane signal tells planning that X is available before the file exists.
+
+### Comparison sub-run
+
+One full research run for one entity of an "X vs Y" comparison; the Engine runs every entity's sub-run in parallel and renders them side by side. *Avoid: competitor run, peer run (for the run itself; "peer" still names a non-main entity).*
+
+Sub-runs share the process's limits (the YouTube fetch gate, paid-call budgets), so any per-run budget for work behind one of those limits is split across the sub-runs rather than granted to each in full. Otherwise the comparison multiplies the work and every sub-run misses the wait a single run fits inside.
 
 ## Flagged ambiguities
 

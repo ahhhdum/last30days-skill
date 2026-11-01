@@ -101,7 +101,7 @@ X search has **two backends** — the skill auto-detects which to use.
 if node_available and AUTH_TOKEN and CT0:
     use bundled Bird    # Free, popup-free, env-authenticated
 elif XAI_API_KEY:
-    use xAI API         # Paid, uses grok-4-1-fast
+    use xAI API         # Paid, uses grok-4.20-0309-non-reasoning by default (LAST30DAYS_X_MODEL overrides)
 else:
     skip X entirely     # No X results
 ```
@@ -117,7 +117,7 @@ Authorization: Bearer {XAI_API_KEY}
 **Payload:**
 ```json
 {
-  "model": "grok-4-1-fast",
+  "model": "grok-4.20-0309-non-reasoning",
   "tools": [{ "type": "x_search" }],
   "input": "Search X for posts about {topic} from {from_date} to {to_date}..."
 }
@@ -151,6 +151,27 @@ The repo vendors a search-only subset of Bird's Twitter GraphQL client and shell
 | `--quick` | 8-12 | 12 | 90s | 30s |
 | default | 20-30 | 30 | 120s | 45s |
 | `--deep` | 40-60 | 60 | 180s | 60s |
+
+### Writing a good X search (`x_query`)
+
+The xurl backend uses X's recent keyword search. It returns only posts that contain every word, lists the newest first rather than the most relevant, and covers the last 7 days. The X API backend matches the whole query as one exact phrase. A plan can set `x_query` on each subquery to give X its own short search. Without one, X searches the topic. The xurl backend keeps up to 5 words as written, cuts a longer topic to its first 5 core words, and excludes reposts.
+
+Measured on 2026-11-01 (posts returned, page size 10):
+
+| Search | Posts | Why |
+|---|---|---|
+| `ai generated game art consistent style with coding agents` | 0 | Every word must appear in one post |
+| `automated playtesting deterministic` | 0 | Three specific words rarely appear together |
+| `automated playtesting` | 10 | Specific subject, nothing extra |
+| `claude code playtest` | 10 | A name people type, plus the subject |
+| `ai agent automated` | 10, crypto spam | Only generic words |
+
+What works:
+- 2 or 3 words, including the topic's most specific term.
+- Words in the order people write them. The X API backend matches `x_query` as one exact phrase.
+- Product names and handles people actually type (`nano banana`, `claude code`) over descriptions.
+- One angle per subquery. Split "playtesting" and "deterministic replay" into two subqueries instead of stacking them.
+- No quotes, operators, or `and`/`or` (the engine strips them), and no dates (the engine keeps those as words).
 
 ---
 

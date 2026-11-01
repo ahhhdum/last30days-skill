@@ -51,6 +51,10 @@ class SubQuery:
     ranking_query: str
     sources: list[str]
     weight: float = 1.0
+    # Optional short keyword search for X (2-3 words). X requires every
+    # keyword in a post, so the long search_query matches nothing there.
+    # Empty means X searches the raw topic, cut to its core keywords.
+    x_query: str = ""
 
     def __post_init__(self) -> None:
         if not self.sources:
@@ -70,6 +74,7 @@ class QueryPlan:
     subqueries: list[SubQuery]
     source_weights: dict[str, float]
     notes: list[str] = field(default_factory=list)
+    person_identity_anchors: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -480,6 +485,7 @@ def subquery_from_dict(payload: dict[str, Any]) -> SubQuery:
         ranking_query=payload["ranking_query"],
         sources=list(payload.get("sources") or []),
         weight=float(payload.get("weight") or 1.0),
+        x_query=str(payload.get("x_query") or ""),
     )
 
 
@@ -492,6 +498,7 @@ def query_plan_from_dict(payload: dict[str, Any]) -> QueryPlan:
         subqueries=[subquery_from_dict(item) for item in payload.get("subqueries") or []],
         source_weights=dict(payload.get("source_weights") or {}),
         notes=list(payload.get("notes") or []),
+        person_identity_anchors=list(payload.get("person_identity_anchors") or []),
     )
 
 
@@ -692,7 +699,7 @@ def candidate_primary_item(candidate: Candidate) -> SourceItem | None:
     return candidate.source_items[0]
 
 
-AGENT_EXPORT_SCHEMA_VERSION = "1.3"
+AGENT_EXPORT_SCHEMA_VERSION = "1.4"
 
 
 def without_sources(report: Report, excluded_sources: set[str]) -> Report:
@@ -942,6 +949,7 @@ def to_agent_export(
         ],
         "clusters": exported_clusters,
         "results": results,
+        "usage": report.artifacts.get("usage"),
     }
 
 

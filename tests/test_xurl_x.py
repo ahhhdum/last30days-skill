@@ -413,30 +413,6 @@ class TestSearchX(unittest.TestCase):
         self.assertIn("--auth", call_args)
         self.assertEqual(call_args[call_args.index("--auth") + 1], "app")
 
-    def test_drops_bare_and_or_that_x_rejects(self):
-        # Regression: X answers a bare "and"/"or" with 400 "Ambiguous use of
-        # and as a keyword", which failed every search for an English topic.
-        completed = mock.Mock(returncode=0, stdout=json.dumps({}))
-        with mock.patch("subprocess.run", return_value=completed) as run_mock:
-            xurl_x.search_x("pricing and packaging or bundles AND tiers")
-        call_args = run_mock.call_args[0][0]
-        self.assertEqual("pricing packaging bundles tiers", call_args[2])
-
-    def test_keeps_uppercase_or_and_quoted_phrases(self):
-        completed = mock.Mock(returncode=0, stdout=json.dumps({}))
-        with mock.patch("subprocess.run", return_value=completed) as run_mock:
-            xurl_x.search_x('"rock and roll" OR jazz')
-        call_args = run_mock.call_args[0][0]
-        self.assertEqual('"rock and roll" OR jazz', call_args[2])
-
-    def test_empty_query_after_sanitizing_skips_the_cli(self):
-        with mock.patch(
-            "subprocess.run",
-            side_effect=AssertionError("an empty query must not spawn xurl"),
-        ):
-            result = xurl_x.search_x("and or")
-        self.assertEqual(xurl_x.ERR_EMPTY_QUERY, result["error"])
-
     def test_max_results_clamped_to_100(self):
         # DEPTH_CONFIG["deep"] = 60, should stay at 60 (within 10-100 range)
         completed = mock.Mock(returncode=0, stdout=json.dumps({}))
@@ -461,6 +437,163 @@ class TestSearchX(unittest.TestCase):
         call_args = run_mock.call_args[0][0]
         n_idx = call_args.index("-n")
         self.assertEqual(int(call_args[n_idx + 1]), xurl_x.DEPTH_CONFIG["default"])
+
+
+class TestSearchXQuerySanitization(unittest.TestCase):
+    """X's v2 grammar 400s on a bare lowercase and/or and treats colon
+    tokens, leading "-", parentheses and quotes as operators. The pipeline
+    hands search_x the raw user topic, so search_x must sanitize it while
+    keeping space-joined keyword semantics (not one exact phrase)."""
+
+    SUFFIX = " " + xurl_x.EXCLUDE_REPOSTS
+
+    def _argv_query(self, topic):
+        """Keywords of the first search (a page with posts, so no retry)."""
+        completed = mock.Mock(returncode=0, stdout=json.dumps({}))
+        with mock.patch("subprocess.run", return_value=completed) as run_mock:
+            xurl_x.search_x(topic)
+        self.assertEqual(run_mock.call_count, 1)
+        argv = run_mock.call_args[0][0]
+        # argv[0] is _xurl_bin(): the full xurl.CMD shim path on Windows.
+        self.assertRegex(argv[0], r"(?i)(^|[\\/])xurl(\.cmd|\.exe)?$")
+        self.assertEqual(argv[1], "search")
+        self.assertTrue(argv[2].endswith(self.SUFFIX), argv[2])
+        return argv[2][: -len(self.SUFFIX)]
+
+    def test_bare_lowercase_and_is_dropped(self):
+        query = self._argv_query(
+            "AI code review and security review tools for Claude Code and Codex"
+        )
+        self.assertNotIn(" and ", f" {query} ")
+        # The shared noise list drops filler ("review", "tools", "for"),
+        # matching bird_x's core-subject cut.
+        self.assertEqual(query, "ai code security claude code")
+
+    def test_or_and_in_any_case_are_dropped(self):
+        self.assertEqual(self._argv_query("cats or dogs OR birds AND fish"), "cats dogs birds fish")
+
+    def test_keyword_semantics_not_exact_phrase(self):
+        query = self._argv_query("claude code")
+        self.assertEqual(query, "claude code")
+        self.assertNotIn('"', query)
+
+    def test_reposts_are_excluded_once(self):
+        completed = mock.Mock(returncode=0, stdout=json.dumps({"data": [{"id": "1"}]}))
+        with mock.patch("subprocess.run", return_value=completed) as run_mock:
+            xurl_x.search_x("claude code -is:retweet")
+        self.assertEqual(run_mock.call_args[0][0][2], "claude code -is:retweet")
+
+    def test_trailing_colon_keeps_python_subject(self):
+        self.assertEqual(self._argv_query("Python: what's new"), "Python what's new")
+
+    def test_trailing_colon_keeps_cplusplus_subject(self):
+        self.assertEqual(self._argv_query("C++: memory safety"), "C++ memory safety")
+
+    def test_trailing_colon_still_drops_operators_and_negation(self):
+        query = self._argv_query("Python: from:attacker since:2020-01-01 -spam and review")
+        self.assertEqual(query, "Python review")
+
+    def test_colon_operator_tokens_are_dropped(self):
+        self.assertEqual(self._argv_query("from:x claude since:2020-01-01 code"), "claude code")
+
+    def test_leading_negation_is_dropped(self):
+        query = self._argv_query("-foo claude -bar")
+        self.assertEqual(query, "claude")
+        self.assertFalse(query.startswith("-"))
+
+    def test_parentheses_and_unbalanced_quotes_become_spaces(self):
+        self.assertEqual(self._argv_query('(claude "code) [agents] {x}'), "claude code agents x")
+
+    def test_query_is_capped(self):
+        query = self._argv_query(" ".join(f"word{i}" for i in range(300)))
+        self.assertEqual(query, "word0 word1 word2 word3 word4")
+
+
+class TestSearchXCoreKeywords(unittest.TestCase):
+    """X requires every keyword in a post, so a long topic matches nothing.
+    search_x cuts the topic to its core keywords and searches once."""
+
+    LONG = "ai generated game art consistent style with coding agents"
+
+    def test_long_topic_is_cut_to_core_keywords(self):
+        self.assertEqual(xurl_x.keyword_query(self.LONG), "ai generated game art consistent")
+
+    def test_short_topic_is_unchanged(self):
+        self.assertEqual(xurl_x.keyword_query("claude code"), "claude code")
+
+    def test_short_query_keeps_words_the_noise_list_would_drop(self):
+        for topic in ("best buy", "code review", "New York", "nano banana sprites"):
+            with self.subTest(topic=topic):
+                self.assertEqual(xurl_x.keyword_query(topic), topic)
+
+    def test_repost_filter_fits_inside_the_query_cap(self):
+        topic = " ".join(["a" * 100] * 5)
+        completed = mock.Mock(returncode=0, stdout=json.dumps({}))
+        with mock.patch("subprocess.run", return_value=completed) as run_mock:
+            xurl_x.search_x(topic)
+        sent = run_mock.call_args[0][0][2]
+        self.assertLessEqual(len(sent), xurl_x.x_api.MAX_QUERY_CHARS)
+        self.assertTrue(sent.endswith(" " + xurl_x.EXCLUDE_REPOSTS))
+
+    def test_zero_posts_does_not_retry_with_a_shorter_prefix(self):
+        # A prefix cut drops the subject and returns spam; zero is honest.
+        empty = mock.Mock(returncode=0, stdout=json.dumps({"meta": {"result_count": 0}}))
+        with mock.patch("subprocess.run", return_value=empty) as run_mock:
+            result = xurl_x.search_x(self.LONG)
+        self.assertEqual(run_mock.call_count, 1)
+        self.assertFalse(result.get("data"))
+
+    def test_nothing_left_returns_error_without_spawning(self):
+        with mock.patch(
+            "subprocess.run",
+            side_effect=AssertionError("an empty query must not reach xurl"),
+        ):
+            result = xurl_x.search_x("and OR from:x -foo ()")
+        self.assertEqual(result, {"error": xurl_x.ERR_EMPTY_QUERY})
+
+
+class TestClassifyInvalidRequest(unittest.TestCase):
+    _BODY = (
+        '{"errors":[{"parameters":{"query":["AI and dummy-x-bearer-secret-000"]},'
+        '"message":"Ambiguous use of and as a keyword. Use a space to logically '
+        'join two clauses, or \\"and\\" to find occurrences of and in text"}],'
+        '"title":"Invalid Request","detail":"One or more parameters to your '
+        'request was invalid.","type":"https://api.twitter.com/2/problems/invalid-request"}'
+    )
+
+    def test_invalid_request_problem_type(self):
+        self.assertEqual(
+            xurl_x._classify_cli_failure("type: .../2/problems/invalid-request"),
+            xurl_x.ERR_INVALID_REQUEST,
+        )
+
+    def test_invalid_request_title(self):
+        self.assertEqual(
+            xurl_x._classify_cli_failure("Error: Invalid Request"),
+            xurl_x.ERR_INVALID_REQUEST,
+        )
+
+    def test_search_x_surfaces_fixed_invalid_request_error(self):
+        completed = mock.Mock(returncode=1, stdout="", stderr=self._BODY)
+        with mock.patch("subprocess.run", return_value=completed):
+            result = xurl_x.search_x("AI code review")
+        self.assertEqual(result, {"error": xurl_x.ERR_INVALID_REQUEST})
+        self.assertNotIn("dummy-x-bearer-secret-000", result["error"])
+        self.assertNotIn("Ambiguous", result["error"])
+
+    def test_auth_and_rate_limit_still_win(self):
+        self.assertEqual(
+            xurl_x._classify_cli_failure("HTTP 401 Unauthorized invalid-request"),
+            xurl_x.ERR_UNAUTHORIZED,
+        )
+        self.assertEqual(
+            xurl_x._classify_cli_failure("rate limit exceeded"),
+            xurl_x.ERR_RATE_LIMITED,
+        )
+
+    def test_unrelated_failure_stays_generic(self):
+        self.assertEqual(xurl_x._classify_cli_failure("boom"), xurl_x.ERR_FAILED)
+
 
 # ---------------------------------------------------------------------------
 # parse_x_response
