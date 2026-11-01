@@ -5927,9 +5927,11 @@ def _retrieve_stream_impl(
             # is single-serve, so no backend runs and no judge-retry follows.
             return _serve_envelope_topic(envelope)
 
-        # Compile X query from raw_topic (like Reddit/YouTube), not planner's
-        # search_query which may contain operator strings like "Rome Italy".
-        x_query = raw_topic or topic or subquery.search_query
+        # Prefer the plan's short X keywords when the planner wrote them;
+        # otherwise compile from raw_topic (like Reddit/YouTube), not the
+        # planner's search_query, which may contain operator strings like
+        # "Rome Italy". X backends cut a long topic to its core keywords.
+        x_query = subquery.x_query or raw_topic or topic or subquery.search_query
         ranking_query = subquery.ranking_query
 
         # One X source, an ordered chain of interchangeable backends. Try the

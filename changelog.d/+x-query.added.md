@@ -1,0 +1,1 @@
+Query plans accept an optional per-subquery `x_query`: 2 or 3 distinctive words for X, whose keyword search requires every word in a post. Without one, the xurl backend searches the topic cut to its first 5 core words instead of the whole topic, and it excludes reposts.

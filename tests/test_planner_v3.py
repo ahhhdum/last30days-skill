@@ -54,6 +54,56 @@ class PlannerV3Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "source_weights"):
             planner.validate_external_plan(invalid_source_weight)
 
+    def test_x_query_survives_sanitizing_and_reweighting(self):
+        raw = {
+            "intent": "how_to",
+            "freshness_mode": "balanced_recent",
+            "cluster_mode": "workflow",
+            "subqueries": [
+                {
+                    "label": "primary",
+                    "search_query": "automated playtesting AI agent game headless bot",
+                    "ranking_query": "How are people using AI agents to playtest games?",
+                    "sources": ["reddit", "x"],
+                    "x_query": "  automated playtesting  ",
+                },
+                {
+                    "label": "no-x-query",
+                    "search_query": "deterministic game replay testing",
+                    "ranking_query": "How do people test games deterministically?",
+                    "sources": ["reddit", "x"],
+                },
+            ],
+        }
+        planner.validate_external_plan(raw)
+        for honor in (False, True):
+            with self.subTest(honor_plan_sources=honor):
+                plan = planner._sanitize_plan(
+                    raw, "ai playtesting", ["reddit", "x"], None, "default",
+                    honor_plan_sources=honor,
+                )
+                self.assertEqual(
+                    ["automated playtesting", ""],
+                    [subquery.x_query for subquery in plan.subqueries],
+                )
+
+    def test_external_plan_rejects_non_string_x_query(self):
+        raw = {
+            "intent": "how_to",
+            "freshness_mode": "balanced_recent",
+            "cluster_mode": "workflow",
+            "subqueries": [
+                {
+                    "search_query": "game playtesting",
+                    "ranking_query": "How do people playtest games?",
+                    "sources": ["x"],
+                    "x_query": ["playtesting"],
+                }
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "x_query"):
+            planner.validate_external_plan(raw)
+
     def test_default_how_to_expands_past_llm_narrow_source_weights(self):
         raw = {
             "intent": "how_to",

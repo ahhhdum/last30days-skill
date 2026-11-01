@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import health, http, log, usage
+from . import health, http, log, query as query_lib, usage
 from . import x_api
 # One X API v2 depth table and one parser: xurl_x re-imports both.
 from .x_api import DEPTH_CONFIG
@@ -280,6 +280,35 @@ def _classify_cli_failure(output: str) -> str:
     return ERR_FAILED
 
 
+# X search/recent requires every keyword to appear in a post, so a long topic
+# ("ai generated game art consistent style with coding agents") matches
+# nothing. Search the topic's core keywords, capped like bird_x (5 words).
+# No shorter retry: cutting to the first 2-3 words drops the subject
+# ("ai agent automated" for a playtesting topic) and returns spam. A plan's
+# x_query (2-3 distinctive words) is the reliable fix.
+CORE_KEYWORDS = 5
+# Reposts were over half of a typical recent-search page and repeat text
+# already counted; X drops them server-side with this operator.
+EXCLUDE_REPOSTS = "-is:retweet"
+
+
+def keyword_query(topic: str) -> str:
+    """Return the topic as at most ``CORE_KEYWORDS`` sanitized keywords.
+
+    Sanitized by ``x_api.build_keyword_query`` (no operators, no bare
+    and/or) before the cut, so dropped tokens never take a slot. Returns ""
+    when nothing lexical survives.
+    """
+    keywords = x_api.build_keyword_query(topic)
+    if not keywords:
+        return ""
+    core = query_lib.extract_core_subject(
+        keywords, max_words=CORE_KEYWORDS, strip_suffixes=True
+    )
+    # X matching is case-insensitive; the core extractor lowercases.
+    return x_api.build_keyword_query(core) or keywords
+
+
 def search_x(
     query: str,
     depth: str = "default",
@@ -287,11 +316,12 @@ def search_x(
 ) -> Dict[str, Any]:
     """Search X via xurl CLI using X API v2 search/recent.
 
-    The topic is sanitized into space-joined keywords first
-    (``x_api.build_keyword_query``): X's v2 grammar rejects a bare lowercase
-    ``and``/``or`` with HTTP 400 and treats ``from:``-style tokens, leading
-    ``-``, parentheses and quotes as operators, and the pipeline always
-    passes the raw user topic here.
+    The topic becomes a short keyword query (``keyword_query``): X's v2
+    grammar rejects a bare lowercase ``and``/``or`` with HTTP 400, treats
+    ``from:``-style tokens, leading ``-``, parentheses and quotes as
+    operators, and requires every keyword to appear in a post. The pipeline
+    passes a plan's x_query or the raw user topic here, so a long topic is
+    cut to its core keywords. Reposts are excluded.
 
     Args:
         query: Search topic (raw user text is fine; it is sanitized)
@@ -305,9 +335,10 @@ def search_x(
         with an "error" key holding a fixed string on failure. The CLI's
         own output reaches only the debug log, never the error.
     """
-    search_query = x_api.build_keyword_query(query)
-    if not search_query:
+    keywords = keyword_query(query)
+    if not keywords:
         return {"error": ERR_EMPTY_QUERY}
+    search_query = f"{keywords} {EXCLUDE_REPOSTS}"
 
     max_results = DEPTH_CONFIG.get(depth, DEPTH_CONFIG["default"])
     # X API v2 search/recent requires max_results in 10–100 range

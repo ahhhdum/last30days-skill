@@ -216,6 +216,9 @@ def validate_external_plan(raw: dict) -> None:
             isinstance(weight, bool) or not isinstance(weight, (int, float))
         ):
             raise ValueError(f"subqueries[{index}].weight must be a number when provided")
+        x_query = subquery.get("x_query")
+        if x_query is not None and not isinstance(x_query, str):
+            raise ValueError(f"subqueries[{index}].x_query must be a string when provided")
 
 
 DEFAULT_INTENT_CAPABILITIES = {
@@ -556,6 +559,7 @@ def _sanitize_plan(
                 ranking_query=ranking_query,
                 sources=sources,
                 weight=max(0.05, float(subquery.get("weight") or 1.0)),
+                x_query=str(subquery.get("x_query") or "").strip(),
             )
         )
     if depth == "quick" and subqueries:
@@ -611,6 +615,7 @@ def _normalize_subquery_weights(subqueries: list[schema.SubQuery]) -> list[schem
             ranking_query=subquery.ranking_query,
             sources=subquery.sources,
             weight=subquery.weight / total,
+            x_query=subquery.x_query,
         )
         for subquery in subqueries
     ]
@@ -650,6 +655,7 @@ def _trim_subqueries_for_depth(
                 ranking_query=subquery.ranking_query,
                 sources=expanded_sources,
                 weight=subquery.weight,
+                x_query=subquery.x_query,
             )
             for subquery in subqueries
         ]
@@ -699,6 +705,7 @@ def _trim_subqueries_for_depth(
                 ranking_query=subquery.ranking_query,
                 sources=preferred_sources,
                 weight=subquery.weight,
+                x_query=subquery.x_query,
             )
         )
     return trimmed

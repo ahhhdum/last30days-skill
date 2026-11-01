@@ -51,6 +51,10 @@ class SubQuery:
     ranking_query: str
     sources: list[str]
     weight: float = 1.0
+    # Optional short keyword search for X (2-3 words). X requires every
+    # keyword in a post, so the long search_query matches nothing there.
+    # Empty means X searches the raw topic, cut to its core keywords.
+    x_query: str = ""
 
     def __post_init__(self) -> None:
         if not self.sources:

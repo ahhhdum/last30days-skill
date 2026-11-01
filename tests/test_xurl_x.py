@@ -445,23 +445,29 @@ class TestSearchXQuerySanitization(unittest.TestCase):
     hands search_x the raw user topic, so search_x must sanitize it while
     keeping space-joined keyword semantics (not one exact phrase)."""
 
+    SUFFIX = " " + xurl_x.EXCLUDE_REPOSTS
+
     def _argv_query(self, topic):
+        """Keywords of the first search (a page with posts, so no retry)."""
         completed = mock.Mock(returncode=0, stdout=json.dumps({}))
         with mock.patch("subprocess.run", return_value=completed) as run_mock:
             xurl_x.search_x(topic)
+        self.assertEqual(run_mock.call_count, 1)
         argv = run_mock.call_args[0][0]
         # argv[0] is _xurl_bin(): the full xurl.CMD shim path on Windows.
         self.assertRegex(argv[0], r"(?i)(^|[\\/])xurl(\.cmd|\.exe)?$")
         self.assertEqual(argv[1], "search")
-        return argv[2]
+        self.assertTrue(argv[2].endswith(self.SUFFIX), argv[2])
+        return argv[2][: -len(self.SUFFIX)]
 
     def test_bare_lowercase_and_is_dropped(self):
         query = self._argv_query(
             "AI code review and security review tools for Claude Code and Codex"
         )
-        self.assertEqual(
-            query, "AI code review security review tools for Claude Code Codex"
-        )
+        self.assertNotIn(" and ", f" {query} ")
+        # The shared noise list drops filler ("review", "tools", "for"),
+        # matching bird_x's core-subject cut.
+        self.assertEqual(query, "ai code security claude code")
 
     def test_or_and_in_any_case_are_dropped(self):
         self.assertEqual(self._argv_query("cats or dogs OR birds AND fish"), "cats dogs birds fish")
@@ -470,17 +476,22 @@ class TestSearchXQuerySanitization(unittest.TestCase):
         query = self._argv_query("claude code")
         self.assertEqual(query, "claude code")
         self.assertNotIn('"', query)
-        self.assertNotIn("-is:retweet", query)
+
+    def test_reposts_are_excluded_once(self):
+        completed = mock.Mock(returncode=0, stdout=json.dumps({"data": [{"id": "1"}]}))
+        with mock.patch("subprocess.run", return_value=completed) as run_mock:
+            xurl_x.search_x("claude code -is:retweet")
+        self.assertEqual(run_mock.call_args[0][0][2], "claude code -is:retweet")
 
     def test_trailing_colon_keeps_python_subject(self):
-        self.assertEqual(self._argv_query("Python: what's new"), "Python what's new")
+        self.assertTrue(self._argv_query("Python: what's new").startswith("python what's"))
 
     def test_trailing_colon_keeps_cplusplus_subject(self):
-        self.assertEqual(self._argv_query("C++: memory safety"), "C++ memory safety")
+        self.assertEqual(self._argv_query("C++: memory safety"), "c++ memory safety")
 
     def test_trailing_colon_still_drops_operators_and_negation(self):
         query = self._argv_query("Python: from:attacker since:2020-01-01 -spam and review")
-        self.assertEqual(query, "Python review")
+        self.assertEqual(query, "python")
 
     def test_colon_operator_tokens_are_dropped(self):
         self.assertEqual(self._argv_query("from:x claude since:2020-01-01 code"), "claude code")
@@ -494,9 +505,29 @@ class TestSearchXQuerySanitization(unittest.TestCase):
         self.assertEqual(self._argv_query('(claude "code) [agents] {x}'), "claude code agents x")
 
     def test_query_is_capped(self):
-        query = self._argv_query(" ".join(["word"] * 300))
-        self.assertLessEqual(len(query), xurl_x.x_api.MAX_QUERY_CHARS)
-        self.assertTrue(query.startswith("word word"))
+        query = self._argv_query(" ".join(f"word{i}" for i in range(300)))
+        self.assertEqual(query, "word0 word1 word2 word3 word4")
+
+
+class TestSearchXCoreKeywords(unittest.TestCase):
+    """X requires every keyword in a post, so a long topic matches nothing.
+    search_x cuts the topic to its core keywords and searches once."""
+
+    LONG = "ai generated game art consistent style with coding agents"
+
+    def test_long_topic_is_cut_to_core_keywords(self):
+        self.assertEqual(xurl_x.keyword_query(self.LONG), "ai generated game art consistent")
+
+    def test_short_topic_is_unchanged(self):
+        self.assertEqual(xurl_x.keyword_query("claude code"), "claude code")
+
+    def test_zero_posts_does_not_retry_with_a_shorter_prefix(self):
+        # A prefix cut drops the subject and returns spam; zero is honest.
+        empty = mock.Mock(returncode=0, stdout=json.dumps({"meta": {"result_count": 0}}))
+        with mock.patch("subprocess.run", return_value=empty) as run_mock:
+            result = xurl_x.search_x(self.LONG)
+        self.assertEqual(run_mock.call_count, 1)
+        self.assertFalse(result.get("data"))
 
     def test_nothing_left_returns_error_without_spawning(self):
         with mock.patch(
