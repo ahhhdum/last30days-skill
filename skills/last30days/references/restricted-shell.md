@@ -1,0 +1,22 @@
+# Restricted-shell hosts (fork addition)
+
+> Fork-local reference of `ahhhdum/last30days-skill`; upstream has no equivalent. It changes how the host runs the engine, not what the engine does. It sits outside the SKILL.md routing table on purpose: the root skill and its standard references are at their size budget (`tests/test_skill_progressive_disclosure.py`), so hosts that need this file are pointed at it directly (the recon agent does).
+
+Some hosts run the shell tool under a managed permission policy that outranks user settings and hard-denies commands the standard blocks depend on. The known case is an organization-managed Claude Code account on Windows. Its policy denies `command` (Claude Code checks inside `$( )`, so `PY=$(command -v python3)` is denied too), `find`, `sed`, `awk`, `xargs`, `env`, `timeout`, `nohup`, `eval`, `sh`, `bash -c`, `python -c`, `python -` (stdin), `uv run`, `uv sync`, `uv python install`, `pip install`, `curl`, and `wget`, and heredocs (`cat > file <<'EOF'`) can be denied as well. On such a host the Runtime Preflight block in `references/runtime.md` and every `mktemp` + `trap` + heredoc tmpfile block (`references/research-runbook.md`, `comparison.md`, `discovery.md`, `grok-bot-x.md`) fail before the engine starts.
+
+Use this path when you know the shell is restricted, or as soon as one of those blocks is denied by a permission rule. Do not retry a denied block or rewrite it piece by piece. This path works on unrestricted hosts too.
+
+1. **Interpreter.** If `LAST30DAYS_PYTHON` is set, use its value. Otherwise run `which python3`, and if that finds nothing, `which python` (Windows usually has no `python3`). Confirm 3.12+ with `python --version`, never `python -c`. The engine imports only the standard library (`dependencies = []` in `pyproject.toml`), so any 3.12+ interpreter works with no venv, `uv run`, or install step. If no 3.12+ interpreter exists, follow the Python version gate in `references/runtime.md`.
+2. **Save directory.** Run `python "<SKILL_DIR>/scripts/last30days.py" --resolve-save-dir` as its own command and use the path it prints. An empty result means saves are disabled: leave out `--save-dir` and `--save-suffix`.
+3. **Plan file.** Write the plan JSON from `references/research-runbook.md` with your file-write tool (Write, in Claude Code), not the shell, to an absolute `.json` path in your scratch or temp directory. The JSON never passes through the shell, so apostrophes need no escaping.
+   - **No file-write tool** (for example a subagent whose tool grant omits Write): pass the plan inline as one line of compact JSON in single quotes, `--plan '{"intent":"how_to",...}'`. `--plan` accepts a file path or inline JSON. Keep apostrophes out of the JSON (`what is`, not `what's`). Where one is unavoidable, write it as `'\''` (close the quote, escaped apostrophe, reopen). Do not use the JSON unicode escape for an apostrophe (a backslash followed by `u0027`): tool-call decoding can turn it into a bare apostrophe before the shell sees it, which closes the quoted string early.
+4. **Engine.** One plain command, with no `$( )`, no `trap`, no pipe, and no wrapper:
+
+   ```bash
+   python "<SKILL_DIR>/scripts/last30days.py" "<topic>" --plan "<plan file>" --emit=compact --save-dir="<save dir>" --save-suffix=v3
+   ```
+
+   Write the step 1 interpreter literally in place of `python`. `<SKILL_DIR>` is the absolute directory of SKILL.md. Add the targeting flags (`--x-handle`, `--subreddits`, `--github-user`, and the rest) as usual. With a native web-search tool, put `export LAST30DAYS_NATIVE_SEARCH=1 && ` in front, in the same Bash call. Bash timeout 300000.
+5. **Output size.** Do not pipe the output through `head`, `tail`, or anything else to cap it. To shrink it, use the engine's own caps: `--quick`, `--max-results N`, `--max-per-source N`. The full render is also saved under `--save-dir` (or to `--output <path>`), so you can Read it in parts.
+6. **Other tmpfile blocks.** The same substitution applies to the comparison `--competitors-plan` file, the discovery `--judgments` and `--angles` files, and the `--x-posts` envelope: write each with the file-write tool and pass its path. `--competitors-plan` also accepts inline JSON. `--judgments`, `--angles`, and `--x-posts` take a path only, so a host with no file-write tool uses the one-shot discovery fallback and runs without `--x-posts`.
+7. **Cleanup.** There is nothing to trap. The plan file stays in your scratch directory; remove it with `rm -f "<plan file>"` if you want.
