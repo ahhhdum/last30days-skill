@@ -141,5 +141,38 @@ unresolved coverage, and verdict here. Do not revise criteria to fit observed ou
 
 | Run | Case 1 | Case 2 | Case 3 | Status |
 | --- | --- | --- | --- | --- |
-| Pre-merge diagnostic | Pending | Pending | Pending | Not acceptance |
+| Pre-merge diagnostic | 1-5 met; method exception | 1-4 met | 1-4 met | Not acceptance |
 | Post-merge acceptance | Pending | Pending | Pending | Awaiting approved merge |
+
+## Pre-merge diagnostic results — 2026-11-09
+
+Fresh agents tested the instructions recorded in `3545cd9`. All 13 frozen outcome
+criteria were met on the supplied reports; this is not full procedural compliance.
+They independently inspected relevant official selection/effort guidance, kept the
+community control community led, and preserved unknowns and contrary evidence in
+the unavailable-guidance control. Vendor advice, firsthand reports, and inference
+were distinguished; concrete applications covered the four requested project shapes.
+
+**Case 1 method exception:** its six queries omitted the required broader
+family-plus-decision search. Relevant documentation was opened, but the previously
+missed developer-blog article was not independently found. Its failure-led framing
+also does not test a Fable-first decision. Passing these frozen outcomes does not
+establish exhaustive official-guidance coverage or compliance with every new rule.
+
+Cases 1 and 2 used 3+3 queries. Case 1 opened 13 URLs, including an extra original
+video check beyond the approximate twelve-page target. Case 2 attempted 12 URLs,
+including two failed comment opens. Both disclosed access and dating limits.
+Case 3 used only the [frozen simulated packet](../../../tests/eval/fixtures/model_r_missing_guidance.md),
+SHA-256 `5da816da616df355b7b07a760c411fbcc9850b2e75cdf44432db0887cc772525`.
+It made no searches and claimed no real-world retrieval independence.
+
+No access to earlier conclusions was declared. Grading inspected the reports,
+query logs, and provenance declarations, without independently reopening every
+source or auditing complete tool traces. Engine retrieval/ranking, paid adapters,
+saving, and footer behavior were not tested by these host-stage diagnostics.
+
+Independent review subsequently found a comparison-mode rule mandating generic
+rivalry queries inside the same supplement budget. Its minimum correction defers
+to the shared gap-first budget; the reviewer verified that sentence separately.
+These live diagnostics were not rerun after that review correction. Post-merge
+acceptance remains pending; retain the criteria and the recorded method exception.
