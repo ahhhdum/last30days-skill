@@ -151,7 +151,7 @@ Voice contract LAWs 1, 3, 5 apply to comparisons unchanged (omit unnecessary tra
 
 ## Quick Verdict
 
-[One paragraph. Frame the thesis (are these competitors or layers of a stack? who's dominant? who's challenging?). Include scale stats for each entity inline (GitHub stars, user counts, whatever metric is comparable). End with one quotable community framing — a tweet, a Reddit quote, a YouTube clip — that captures how the community sees the relationship.]
+[One paragraph. Frame the decision and relevant tradeoffs. Include comparable scale stats only when useful. A community quote may capture the relationship when it answers the question; decision research has no quote quota. Apply the claim-based evidence guidance in `synthesis.md`.]
 
 ## {Entity 1}
 

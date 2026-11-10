@@ -355,7 +355,7 @@ Store: `META_ADS_PAGE = {page id or empty}` — add `meta_ads` to `--search`, an
 
 **MANDATORY on Claude Code (and any platform with WebSearch), on every run, including repeat runs of the same topic.** Run Step 0.55 before the engine. An engine command without a `--plan` carrying resolved handles and subreddits is a Step 0.55 skip, and the engine's `[Resolve] No web search backend available, skipping resolve` line means this step was skipped, not that the engine covered it.
 
-**Run 2-3 focused WebSearches (in parallel, inside the pre-engine isolated web search dispatch) to resolve platform-specific targeting. Do NOT search for every platform individually - that wastes time. Instead, use your knowledge of the topic to infer most targeting, and only WebSearch for what you can't infer.**
+**Run 2-3 focused WebSearches inside the pre-engine isolated web search dispatch for targeting and the user's unanswered questions.** Infer obvious platform targeting; do not search every platform individually. For decision research, identify the questions that could change the recommendation and allocate searches to their evidence gaps, including first-party guidance below.
 
 **1. X handles** - Already resolved in Step 0.5 above (including company handles and commentators). Reference your `RESOLVED_HANDLE` and `RESOLVED_RELATED` from that step.
 
@@ -400,7 +400,9 @@ Store as `RESOLVED_IG_CREATORS`.
 
 Store as `RESOLVED_YT_QUERIES`.
 
-**6. First-party positioning** - **MANDATORY when WebSearch is available, for company / product / service topics.** If the topic (or, in a vs-run, an entity) is a company, product, or service with a public presence, fetch its CURRENT stated positioning. Do **NOT** rely on memory - homepages and positioning go stale as companies rewrite copy and pivot, and a stale claim produces a false gap. Anchor on first-party sources: the homepage tagline, docs, pricing, or a "compare/why-us" page. Fold this into the per-entity passes above where you can (e.g. add `official site` to a query); otherwise run one focused search per entity (`{TOPIC} official site`, `{TOPIC} pricing`). Capture the one-line value prop and any explicit claims ("zero-config", "fastest", "open source"). Store as `RESOLVED_POSITIONING`. This is what the entity *pitches*; the engine's community data is what people *actually talk about*. Use it three ways: ground `What it is` descriptions (describe the entity as it pitches itself TODAY, not as remembered), help reject unrelated brand-name noise (knowing what the entity is makes off-brand matches obvious), and feed the pitch-vs-pulse synthesis beat - a PROSE note that fires only when the month's evidence directly supports, cuts against, or is squarely about the pitch (see the synthesis section; orthogonal evidence gets silence, not a verdict). Skip (and omit `RESOLVED_POSITIONING`) for people, events, abstract concepts, and ownerless topics - they make no comparable public claim. The test is an identifiable first party with a fetchable pitch, and people NEVER pass it - not even founders/creators whose companies would qualify. The lens can apply to MrBeast (a company) but never to Jimmy Donaldson (a person); a person-vs-person run ("Garry Tan vs Sam Altman") gets no positioning research at all. Ownerless topics fail the same test: Bitcoin has no authoritative first party, and a foundation or fan site does not count.
+**6. First-party grounding** - For company / product / service topics with an identifiable first party, read current official material relevant to the user's question; a homepage or launch announcement alone does not establish decision coverage. For model selection, seek task-choice and effort guidance, plus pricing, compatibility, or limits only where they affect the decision. Search both the exact release and broader family + decision terms (e.g. `Claude model selection effort`); follow official cross-links to docs, developer blogs, and release hubs rather than assuming one domain contains everything. Use the existing pre-research and supplement budgets, not a new per-entity sweep. Record unanswered questions for Step 2; inaccessible guidance is not proof none exists.
+
+For community-pulse questions, keep community experience central; consult official material only to identify the product and clarify relevant facts. When a current pitch is available, retain its one-line value prop as `RESOLVED_POSITIONING` for descriptions, entity disambiguation, and the conditional pitch-vs-pulse synthesis beat. Attribute it as a claim, not demonstrated performance. Omit positioning for people, events, abstract concepts, and ownerless topics; a foundation or fan site is not an authoritative first party.
 
 **Concrete examples:**
 
@@ -651,38 +653,19 @@ If host web search is unavailable, skip this step. Otherwise, after the script f
 **Run 2-3 post-engine WebSearch supplements. This is a SEPARATE budget from Step 0.55 pre-research. Pre-research WebSearches DO NOT count against this budget.**
 
 - Default: 3 supplements. Drop to 2 if the engine returned 80+ items AND the topic is niche enough that extra web context would be noise.
-- Zero supplements is almost never correct. The social-first engine misses long-form analysis, critic reactions, and news context that shape good synthesis. If you are tempted to skip supplements, run at least 2.
+- The engine can miss decision guidance, long-form trials, and context. Use at least 2 supplements to address material gaps.
 - Ceiling: 3. Do not fire 5+ "just in case" - that is what pushed runtimes to 9 minutes on earlier validation.
 
 For every research mode on a host with web search, do supplements after the engine. Web search alone does not replace the engine.
 
-Choose search queries based on QUERY_TYPE:
+Choose each query for the largest unanswered question, using the engine evidence and Step 0.55 coverage. For decisions, seek relevant official guidance and original trials/counterexamples before generic popularity lists. Broaden an exact release query to its verified family + decision terms when needed; do not substitute a different product. Open the relevant pages, not just search snippets. A vendor benchmark is a vendor measurement, even when reposted elsewhere.
 
-**If RECOMMENDATIONS** ("best X", "top X", "what X should I use"):
-- Search for: `best {TOPIC} recommendations`
-- Search for: `{TOPIC} list examples`
-- Search for: `most popular {TOPIC}`
-- Goal: Find SPECIFIC NAMES of things, not generic advice
+- **RECOMMENDATIONS:** specific candidates and task-selection boundaries, configuration, limitations, and completed-work cost/speed where relevant.
+- **NEWS:** recent developments and their original sources; separate publication date from event/release date.
+- **PROMPTING:** concrete techniques and examples with the actual model/version/settings.
+- **GENERAL / community pulse:** firsthand routines, frustrations, disagreements, and long-form experience; no unrelated documentation sweep.
 
-**If NEWS** ("what's happening with X", "X news"):
-- Search for: `{TOPIC} news 2026`
-- Search for: `{TOPIC} announcement update`
-- Goal: Find current events and recent developments
-
-**If PROMPTING** ("X prompts", "prompting for X"):
-- Search for: `{TOPIC} prompts examples 2026`
-- Search for: `{TOPIC} techniques tips`
-- Goal: Find prompting techniques and examples to create copy-paste prompts
-
-**If GENERAL** (default):
-- Search for: `{TOPIC} 2026`
-- Search for: `{TOPIC} discussion`
-- Goal: Find what people are actually saying
-
-For ALL query types:
-- **USE THE USER'S EXACT TERMINOLOGY** - don't substitute or add tech names based on your knowledge
-- EXCLUDE reddit.com, x.com, twitter.com (covered by script)
-- INCLUDE: blogs, tutorials, docs, news, GitHub repos
+Use the user's terminology and verified aliases. Include blogs, tutorials, docs, news, and repositories; normally exclude reddit.com, x.com, twitter.com because the engine covered them. If guidance remains inaccessible or evidence is thin when the budget ends, state the specific gap rather than inventing an answer or extending the search indefinitely.
 
 **Options** (passed through from user's command):
 - `--days=N` → Look back N days instead of 30 (e.g., `--days=7` for weekly roundup). `--lookback-days=N` is the same flag under its explicit name

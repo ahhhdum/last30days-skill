@@ -16,11 +16,11 @@ Results group evidence by story/theme across platforms.
 
 **Synthesis strategy for cluster-first output:**
 1. **Synthesize per-cluster first.** Each cluster = one story. Summarize what each story is about.
-2. **Multi-source clusters are highest confidence.** A cluster with items from Reddit + X + YouTube is much stronger than single-source.
-3. **Check uncertainty tags.** "single-source" means treat with caution. "thin-evidence" means mention but caveat.
+2. **Check independence.** Trace cross-platform items to their original observation; reposts of one announcement or trial are one evidence chain, not corroboration.
+3. **Check uncertainty tags.** These describe engine coverage, not proof. A single primary source can establish a documented fact; thin evidence cannot establish broad performance or adoption.
 4. **Cross-cluster synthesis second.** After covering individual stories, identify themes that span clusters.
-5. **Engagement signals still matter.** Items with high likes/upvotes/views within a cluster are the strongest evidence points.
-6. **Quote directly from evidence snippets.** The snippets are pre-extracted best passages - use them.
+5. **Engagement measures attention.** Votes, views and replies help explain community interest, not technical correctness or general performance.
+6. **Quote from actual evidence.** Keep attribution and enough source context to preserve the claim's meaning.
 7. Extract the top 3-5 actionable insights across all clusters.
 8. **Disambiguation: trust your resolved entity.** When Step 0.55 resolved a specific entity (handles, subreddits, location context), prioritize content about THAT entity in your synthesis. If search results contain a different entity with the same name (e.g., a Spanish resort vs a WA athletic club both called "Bellevue Club"), lead with the entity your resolution identified. Drop the other entity silently, including from the invitation; never note that it exists or is unrelated (LAW 9). The resolved handles are the strongest signal for user intent.
 
@@ -34,25 +34,25 @@ The engine applies the selected register to evidence section order, item budgets
 - **creator** - Lead with the sharpest audience hook, then Best Takes and high-vote community language. Bring views, likes, shares, comment velocity, and cross-platform resonance forward. End the synthesis body with 3 concrete content angles or hooks grounded in the evidence; do not invent trend claims from raw reach alone.
 - **eli5** - Use the established ELI5 guidance below. Evidence selection and renderer bytes remain equivalent to `default`; only the explanation register changes.
 
-### Source-Specific Guidance (still applies within clusters)
+### Evidence by claim (still applies within clusters)
 
 The Judge Agent must:
-1. Weight Reddit/X sources HIGHER (they have engagement signals: upvotes, likes)
-2. Weight YouTube sources HIGH (they have views, likes, and transcript content)
-3. Weight TikTok sources HIGH (they have views, likes, and caption content - viral signal)
-4. Weight WebSearch sources LOWER (no engagement data)
-5. **For Reddit, YouTube, and TikTok: Pay special attention to top comments** - they often contain the wittiest, most insightful, or funniest take. Quote them directly, attributing to the commenter and including the vote count ("N upvotes" for Reddit, "N likes" for YouTube and TikTok). A top comment with thousands of votes is a stronger community signal than the parent post's stats alone.
-6. **For YouTube: Quote transcript highlights AND top comments.** Transcript highlights capture the video's own words; top comments capture how viewers reacted. Both add value - use them together. Attribute transcript quotes to the channel name.
-7. Identify patterns that appear across ALL sources (strongest signals)
-8. Note any contradictions between sources
-9. **Multi-source clusters (items from 3+ platforms) are the strongest signals.** Lead with these.
+1. Use current official documentation for documented operational facts such as supported settings, limits and availability. Preserve version/date and relevant conflicts with observed behavior.
+2. Attribute official model/task guidance as intended-use advice, not independent proof that it wins on the user's work. Label vendor benchmarks as vendor measurements.
+3. Prefer original trials for performance claims. Record the task, model/version, effort, harness, method and outputs when available; compare quality, speed and cost per completed task rather than list price alone. Missing details limit the conclusion.
+4. Use specific firsthand reports for workflow experience. Separate what someone tried and observed from their explanation, recommendation or claim about widespread adoption.
+5. Trace independent evidence across platforms. Multiple posts repeating one result do not establish multiple trials; disclose shared origins or uncertain independence.
+6. Use engagement to describe attention, sentiment or reach. Popularity and platform counts do not establish correctness, reliability or task suitability.
+7. For new releases, distinguish official guidance, original hands-on evidence, early anecdotes and your inference. Strengthen conclusions as relevant evidence matures, without a fixed days-since-launch cutoff.
+8. Keep community-pulse questions community led. Read relevant transcript passages and comments for actual experience or reaction, preserving attribution; do not require entertaining quotes in a technical decision brief.
+9. Surface meaningful contradictions and their conditions instead of averaging unlike tasks, settings or sources into one verdict.
 10. **For GitHub person-mode data:** When the output includes "GitHub Person Profile" items, these contain PR velocity, top repos with star counts, release notes, README summaries, and top issues. Lead with the velocity headline ("X PRs merged across Y repos"), then highlight the most impressive repos by star count. Weave release notes into the narrative to show what actually shipped. For own projects, mention top feature requests and complaints as community signal. The cross-source story is: "X is shipping Y (GitHub) while people on Z platform are saying W about it."
 11. **For GitHub project-mode data:** When the output includes "GitHub project:" items, these have live star counts, README snippets, release notes, and top issues fetched directly from the API. Always prefer these numbers over star counts cited by blog posts, YouTube videos, or tweets. Live API data is authoritative. When items include "(live: NNK stars)" annotations, use those numbers.
 12. **For GitHub star enrichment:** When candidates have `(live: NNK stars)` appended to their evidence, that number came from a post-research API check. It overrides whatever the original source claimed.
 
 ### Prediction Markets (Polymarket)
 
-**CRITICAL: When Polymarket returns relevant markets, prediction market odds are among the highest-signal data points in your research.** Real money on outcomes cuts through opinion. Treat them as strong evidence, not an afterthought.
+**When Polymarket returns relevant markets, report their implied probabilities as evidence of market expectations.** They are not verified outcomes or proof of a technical claim.
 
 **How to interpret and synthesize Polymarket data:**
 
@@ -74,15 +74,15 @@ The Judge Agent must:
 
 **Do NOT display stats here - they come at the end, right before the invitation.**
 
-6. **Polymarket odds with real money behind them are STRONGER signals than opinions.** A $66K volume market with 96% odds is more reliable than 100 tweets. Always include specific percentages in the synthesis when Polymarket markets are confirmed relevant.
+6. Include specific percentages when markets are relevant to the question. Do not treat money, volume or high odds as evidence that a claim is true.
 
 ### X Reply Cluster Weighting
 
-When you see a cluster of replies to a recommendation-request tweet (someone asking "what's the best X?" and getting multiple independent responses), call this out prominently. This is the strongest form of community endorsement - real people independently making the same recommendation without coordination. Example: "In a thread where @ecom_cork asked for Loom alternatives, every reply said Tella."
+A cluster of specific firsthand replies can show practical convergence. Check whether replies describe independent experience or repeat a promotion/result; account count alone does not establish independence or comparative performance.
 
 ### WebSearch Supplement Weighting for Comparisons
 
-For product comparison queries, WebSearch supplements (blog comparisons, review articles) should be weighted equally with social data. A detailed 2,000-word comparison article from Efficient App is more informative than 50 one-line tweets. Feature it in the synthesis.
+For comparisons, apply the same claim-specific evidence rules. A long article earns weight through relevant methods, original observations and inspectable outputs, not length or publication platform. Follow shared benchmark claims to their origin rather than counting each retelling.
 
 ---
 
@@ -97,7 +97,7 @@ Read the research output carefully. Pay attention to:
 
 **ANTI-PATTERN TO AVOID**: If user asks about "clawdbot skills" and research returns ClawdBot content (self-hosted AI agent), do NOT synthesize this as "Claude Code skills" just because both involve "skills". Read what the research actually says.
 
-**FUN CONTENT (see LAW 9): the EVIDENCE block's `## Top Community Comments` section (present when 2+ relevance-qualified comments exist and the GENERAL nothing-solid floor did not fire) and any `## Best Takes` section are the voice of the people - weave at least 2 of the funniest/cleverest VERBATIM quotes into your synthesis.** A 1,338-upvote comment that says "Where's the limewire link" tells you more about the cultural moment than a news article. Quote the actual text. Attribute the commenter using the citation form required by higher-priority host/tool requirements and user instructions. On a hidden-link host (Claude Code; Grok Bot / Cursor agent chat), copy comment URLs verbatim from the block. On a visible-URL host (Codex, Gemini CLI, raw CLI), use plain attribution only when links are not required. Never reconstruct a URL. Don't put fun content in a separate section - mix it into the narrative where it fits naturally. This is what makes the report feel alive rather than like a news summary. Do NOT wait for a `## Best Takes` section - it is often empty; `## Top Community Comments` is the always-on source when qualifying comments remain.
+**FUN CONTENT (see LAW 9):** Use relevant comments from `## Top Community Comments` or `## Best Takes` when they advance the user's question, subject to higher-priority host/tool requirements and user instructions. Community-pulse and creator reports can include witty reactions; technical decisions need useful experience, not a quota of funny quotes. Preserve the nothing-solid floor and never invent quotes. Attribute actual text with its source URL: on hidden-link hosts (Claude Code; Grok Bot / Cursor agent chat), copy the comment's URL verbatim; on visible-URL hosts (Codex, Gemini CLI, raw CLI), use plain attribution only when links are optional. Never reconstruct URLs or create a separate comments section just to fill it.
 
 **ELI5 MODE: If REGISTER is `eli5` (including the legacy `ELI5_MODE=true` fallback), apply these writing guidelines to your ENTIRE synthesis. Otherwise skip this block completely and write normally.**
 
@@ -151,29 +151,9 @@ CITATION RULE: Meet higher-priority host/tool requirements and user instructions
 
 **URL formatting is governed by LAW 8** in the root output contract, subject to higher-priority host/tool requirements and user instructions. The defaults are inline `[name](url)` on hidden-link hosts (Claude Code; Grok Bot / Cursor agent chat) and plain source labels on visible-URL hosts (Codex/Gemini CLI/raw CLI). Preserve any required citation form, including links on visible-URL hosts. Re-read LAW 8 now if you skipped it. The stats footer is engine-emitted per LAW 5 and passes through verbatim where compatible with governing instructions.
 
-CITATION PRIORITY (most to least preferred). Examples are shown in plain-label shape. Use `[label](url)` on a hidden-link host or whenever higher-priority host/tool requirements or user instructions require links:
-1. @handles from X - `per @handle` (these prove the tool's unique value)
-2. r/subreddits from Reddit - `per r/subreddit` (when citing Reddit, YouTube, or TikTok, prefer quoting top comments over just the thread title)
-3. YouTube channels - `per channel name on YouTube` (transcript-backed insights)
-4. TikTok creators - `per @creator on TikTok` (viral/trending signal)
-5. Instagram creators - `per @creator on Instagram` (influencer/creator signal)
-6. HN discussions - `per HN` or `per hn/username` (developer community signal)
-7. Polymarket - `Polymarket has X at Y% (up/down Z%)` with specific odds and movement
-8. Web sources - ONLY when Reddit/X/YouTube/TikTok/Instagram/HN/Polymarket don't cover that specific fact; name the publication: `per Rolling Stone`
+CITATION PRIORITY follows the claim, not the platform. Cite the closest inspected original source under the evidence rules above: documentation for operational facts, attributed official advice for intended use, original trials for measured outcomes, and firsthand accounts for workflows or reactions. A social repost does not replace the underlying source merely because it has more engagement. Use `[label](url)` whenever governing instructions require links and copy URLs from the actual evidence.
 
-The tool's value is surfacing what PEOPLE are saying, not what journalists wrote.
-When both a web article and an X post cover the same fact, cite the X post.
-
-(These narrative examples illustrate LAW 8 defaults. Required host, tool, or user citation forms take precedence over these examples.)
-
-**BAD (too many weak citations):** "His album is set for March 20 (per Rolling Stone; Billboard; Complex)."
-**GOOD on hidden-link hosts (Claude Code, Grok Bot / Cursor agent chat):** "His album BULLY drops March 20 - fans on X are split on the tracklist, per [@honest30bgfan_](https://x.com/honest30bgfan_)"
-**GOOD on visible-URL hosts (Codex), when plain labels are permitted:** "His album BULLY drops March 20 - fans on X are split on the tracklist, per @honest30bgfan_"
-**OK** (web, only when Reddit/X don't have it): "The Hellwatt Festival runs July 4-18 at RCF Arena, per Billboard" (inline-linked on a hidden-link host)
-
-**Lead with people, not publications.** Start each topic with what Reddit/X
-users are saying/feeling, then add web context only if needed. The user came
-here for the conversation, not the press release.
+**Lead with what answers the question.** Community-pulse reports lead with what people are saying; technical choices lead with the strongest relevant evidence and its limits. Do not force either vendor positioning or entertaining reactions ahead of the user's decision.
 
 **MANDATORY - bold headline per narrative paragraph.** Every paragraph in the "What I learned" section MUST begin with a bolded headline phrase that summarizes the paragraph, followed by ` - ` (a SINGLE HYPHEN with spaces on both sides, NOT an em-dash) and the body text. Pattern: `**Headline phrase** - body text describing what people are saying...`. Without the bold headline, the output is unscannable slop.
 
