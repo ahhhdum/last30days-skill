@@ -196,7 +196,7 @@ Pass plans on stdin using `--plan -` and a quoted heredoc delimiter that does no
 
 **LAW 8 post-synthesis self-check:** First preserve all citations required by governing instructions. On hidden-link hosts, add missing known `[name](url)` links. On visible-URL hosts, replace links with plain labels only when optional. Regenerate at most once. The final checklist supplements this check; it never replaces it. Never remove a required citation to satisfy LAW 1.
 
-**LAW 9 - WEAVE THE COMMUNITY VOICE; NEVER NARRATE THE TOOLING.** When at least two actual relevance-qualified comments exist in `## Top Community Comments` or `## Best Takes` and the nothing-solid floor did not reject them, weave at least two verbatim, attributed comments into the narrative. Do not create a separate Comments section. Weigh high-vote reactions as substantive signal. Copy each comment's URL verbatim when linking; apply governing citations and LAW 8. Never narrate engine mechanics, name collisions, noisy columns, or internal failures in the deliverable. Present supported facts about the subject; engine health belongs in diagnostics.
+**LAW 9 - USE COMMUNITY VOICE WHERE IT ANSWERS THE QUESTION.** For community-pulse research, weave relevant attributed comments from `## Top Community Comments` or `## Best Takes` into the narrative. Decision research has no quote quota; use comments for material firsthand experience or disagreement. The nothing-solid floor still rejects unsupported comments. Votes measure attention, not correctness. Copy comment URLs verbatim; apply governing citations and LAW 8. Never narrate engine mechanics or name collisions; disclose material evidence gaps, while engine health belongs in diagnostics.
 
 **LAW 10 - FIRST-PARTY POSTS ARE FIRST-CLASS EVIDENCE; READ THE INTERACTION TAG.** For person topics, quote and weigh the subject's own `from:{handle}` posts as primary signal when present. Do not substitute third-party coverage for the subject's available voice. `interaction:→@handle` denotes the subject's reply/mention and is a relationship signal even at near-zero engagement; repeated personal interactions matter beyond counts. Describe what the interaction shows without narrating tags or scoring mechanisms.
 
@@ -208,8 +208,8 @@ Check governing formatting/citation instructions first. Skip a conflicting prese
 
 1. Normal narrative paragraphs start `**Headline phrase** -`; no invented title, forbidden section headers, or unquoted em/en dashes. Comparison and audience-register exceptions follow their selected templates.
 2. Relay the emitted fenced footer exactly, including every active nonzero source's emoji/count/engagement lines. Add no zero-result source, outcome/⚠ text, or saved path.
-3. Weave at least two actual attributed comments when qualifying evidence exists. The GENERAL nothing-solid floor overrides rejected comments. Run LAW 8's citation check separately; never reconstruct URLs.
-4. Remove tooling meta-commentary. Keep claims grounded in the actual output and resolved entity.
+3. Apply LAW 9's intent-matched community voice; never quote rejected comments. Run LAW 8's citation check separately; never reconstruct URLs.
+4. Remove tooling meta-commentary. Has each decision-driving question suitable evidence, or an explicit unresolved gap? Keep claims grounded; separate official guidance, hands-on results, early anecdotes, and inference for new releases.
 5. If Polymarket returned markets, include specific percentages and directional movement; do not substitute dollar volume for odds.
 6. Preserve every required citation. Omit only unnecessary duplicate trailing source lists.
 7. On host-WebSearch paths, verify `--emit=compact --plan -` with a quoted JSON heredoc and every applicable resolved handle/subreddit/hashtag/creator flag. If protocol was skipped, return to resolution/planning and run it; do not hide the engine's pre-research warning.

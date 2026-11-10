@@ -6,7 +6,7 @@ Read for recommendation intent before ranking and rendering. The root citation a
 
 **The failure mode for RECOMMENDATIONS queries is "counting when you should have judged."** Mention count rewards whatever is already popular, which is rarely what is actually recommended. Rank by signal quality instead.
 
-**Signal weights (highest to lowest):**
+**Community-endorsement weights (highest to lowest):** These rank reported preferences, not factual authority. Apply `synthesis.md`'s claim-based evidence guidance first: official facts and attributed task-selection guidance remain relevant even without a practitioner endorsement. For decision research, lead with task fit rather than novelty or switching activity.
 1. **Practitioner testimony** (weight 5) - first-person "I use X and here's why" with specific reasoning, version numbers, or workflow details
 2. **Expert defection / authority move** (weight 4) - a domain insider publicly switching, endorsing, or picking (e.g., Flask creator switching from Python to Go)
 3. **Measurable claim** (weight 4) - specific number, benchmark, production adoption proof (e.g., "43.7% latency win", "LinkedIn and Uber running it in prod")
@@ -20,7 +20,7 @@ Read for recommendation intent before ranking and rendering. The root citation a
 - RECOMMENDED = reasoned picks from voices with stakes in the outcome (practitioners, experts, case studies, people who switched)
 - Only RECOMMENDED items drive the top of the ranking. Existing-but-not-recommended items go in "Also mentioned" at the bottom with a one-line note on why they are mentions not picks.
 
-**Lead with the 30-day DELTA, not the status-quo baseline.** What is the interesting movement? Who is switching? What is the contrarian signal? A status-quo leader with no movement is a footer item, not the headline. "Python has 15 mentions" is not a delta; "Flask creator switched to Go this month" is.
+**For community trends, lead with the 30-day DELTA.** Who is switching, and why? "Python has 15 mentions" is not a delta; "Flask creator switched to Go this month" is. A stable incumbent can still be the right task-based recommendation.
 
 **Output shape:**
 
@@ -79,7 +79,7 @@ Notice how the good version:
 **Rendering:** use the signal-quality template above; mention counts do not determine ranking.
 
 **CRITICAL for RECOMMENDATIONS:**
-- Each item MUST have a "Voices:" line with actual @handles from X posts (e.g., @LONGLIVE47, @ByDobson)
+- Each item MUST have a "Voices:" line naming its actual sources; use available handles, authors, or official documents without inventing social endorsements.
 - Include subreddit names (r/hiphopheads) and web sources (Complex, Variety)
 - Parse @handles from research output and include the highest-engagement ones
 - Format naturally - tables work well for wide terminals, stacked cards for narrow
